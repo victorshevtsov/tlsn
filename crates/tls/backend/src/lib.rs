@@ -44,6 +44,16 @@ pub enum BackendError {
     EncryptionError(String),
     #[error("Decryption error: {0:?}")]
     DecryptionError(String),
+    #[error("Server finished error: {0:?}")]
+    ServerFinished(String),
+    #[error("Server finished error: {0:?}")]
+    ClientFinished(String),
+    #[error("Key exchange error: {0:?}")]
+    KeyExchange(String),
+    #[error("Prf error: {0:?}")]
+    Prf(String),
+    #[error("Other error: {0:?}")]
+    Other(String),
 }
 
 /// Encryption modes for Crypto implementor
