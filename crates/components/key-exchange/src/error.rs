@@ -6,7 +6,7 @@ use std::{error::Error, fmt::Display};
 pub struct KeyExchangeError(#[from] ErrorRepr);
 
 #[derive(Debug, thiserror::Error)]
-enum ErrorRepr {
+pub(crate) enum ErrorRepr {
     /// An unexpected state was encountered
     State(Box<dyn Error + Send + Sync + 'static>),
     /// Context error.
@@ -85,6 +85,11 @@ impl KeyExchangeError {
         E: Into<Box<dyn Error + Send + Sync + 'static>>,
     {
         Self(ErrorRepr::Key(err.into()))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn kind(&self) -> &ErrorRepr {
+        &self.0
     }
 }
 

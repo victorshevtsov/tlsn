@@ -71,10 +71,10 @@ pub trait KeyExchange<Ctx, V> {
     /// Performs any necessary one-time setup, returning a reference to the PMS.
     ///
     /// The PMS will not be assigned until `compute_pms` is called.
-    async fn setup(&mut self, vm: &mut V) -> Result<Pms, KeyExchangeError>;
+    fn setup(&mut self, vm: &mut V) -> Result<Pms, KeyExchangeError>;
 
     /// Preprocesses the key exchange.
-    async fn preprocess(&mut self, ctx: &mut Ctx, vm: &mut V) -> Result<(), KeyExchangeError>;
+    async fn preprocess(&mut self, ctx: &mut Ctx) -> Result<(), KeyExchangeError>;
 
     /// Computes the PMS.
     async fn compute_pms(&mut self, ctx: &mut Ctx, vm: &mut V) -> Result<Pms, KeyExchangeError>;

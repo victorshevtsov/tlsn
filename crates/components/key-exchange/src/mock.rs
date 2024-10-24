@@ -39,6 +39,10 @@ pub fn create_mock_key_exchange_pair() -> (MockKeyExchange, MockKeyExchange) {
 
 #[cfg(test)]
 mod tests {
+    use mpz_common::executor::TestSTExecutor;
+    use mpz_garble::protocol::semihonest::{Evaluator, Generator};
+    use mpz_ot::ideal::cot::{IdealCOTReceiver, IdealCOTSender};
+
     use super::*;
     use crate::KeyExchange;
 
@@ -48,7 +52,16 @@ mod tests {
 
         fn is_key_exchange<T: KeyExchange<Ctx, V>, Ctx, V>(_: T) {}
 
-        is_key_exchange(leader);
-        is_key_exchange(follower);
+        is_key_exchange::<
+            MpcKeyExchange<IdealShareConverter, IdealShareConverter>,
+            TestSTExecutor,
+            Generator<IdealCOTSender>,
+        >(leader);
+
+        is_key_exchange::<
+            MpcKeyExchange<IdealShareConverter, IdealShareConverter>,
+            TestSTExecutor,
+            Evaluator<IdealCOTReceiver>,
+        >(follower);
     }
 }
