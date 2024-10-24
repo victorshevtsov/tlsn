@@ -77,5 +77,5 @@ pub trait KeyExchange<Ctx, V> {
     async fn preprocess(&mut self, ctx: &mut Ctx, vm: &mut V) -> Result<(), KeyExchangeError>;
 
     /// Computes the PMS.
-    async fn compute_pms(&mut self, ctx: &mut Ctx) -> Result<Pms, KeyExchangeError>;
+    async fn compute_pms(&mut self, ctx: &mut Ctx, vm: &mut V) -> Result<Pms, KeyExchangeError>;
 }

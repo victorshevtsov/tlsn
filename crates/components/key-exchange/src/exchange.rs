@@ -6,7 +6,7 @@ use mpz_common::{scoped_futures::ScopedFutureExt, Allocate, Context, Preprocess}
 use mpz_fields::{p256::P256, Field};
 use mpz_memory_core::{
     binary::{Binary, U8},
-    Array, MemoryExt,
+    Array, Memory, MemoryExt, View, ViewExt,
 };
 use mpz_share_conversion::{ShareConversionError, ShareConvert};
 use mpz_vm_core::{CallBuilder, Vm, VmExt};
@@ -204,7 +204,7 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
 impl<Ctx, V, C0, C1> KeyExchange<Ctx, V> for MpcKeyExchange<C0, C1>
 where
     Ctx: Context,
-    V: Vm<Binary>,
+    V: Vm<Binary> + Memory<Binary> + View<Binary>,
     C0: Allocate + Preprocess<Ctx, Error = ShareConversionError> + ShareConvert<Ctx, P256> + Send,
     C1: Allocate + Preprocess<Ctx, Error = ShareConversionError> + ShareConvert<Ctx, P256> + Send,
 {
@@ -233,10 +233,7 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn setup(&mut self, vm: &mut V) -> Result<Pms, KeyExchangeError>
-    where
-        V: Vm<Binary>,
-    {
+    async fn setup(&mut self, vm: &mut V) -> Result<Pms, KeyExchangeError> {
         let State::Initialized = self.state.take() else {
             return Err(KeyExchangeError::state("not in initialized state"));
         };
@@ -247,26 +244,40 @@ where
 
         let (share_a0, share_b0, share_a1, share_b1) = match self.config.role() {
             Role::Leader => {
-                let share_a0 = self
-                    .executor
-                    .new_private_input::<[u8; 32]>("pms/share_a0")?;
-                let share_b0 = self.executor.new_blind_input::<[u8; 32]>("pms/share_b0")?;
-                let share_a1 = self
-                    .executor
-                    .new_private_input::<[u8; 32]>("pms/share_a1")?;
-                let share_b1 = self.executor.new_blind_input::<[u8; 32]>("pms/share_b1")?;
+                let share_a0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_private(share_a0).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_a0).map_err(KeyExchangeError::vm)?;
+
+                let share_b0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_blind(share_b0).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_b0).map_err(KeyExchangeError::vm)?;
+
+                let share_a1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_private(share_a1).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_a1).map_err(KeyExchangeError::vm)?;
+
+                let share_b1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_blind(share_b1).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_b1).map_err(KeyExchangeError::vm)?;
 
                 (share_a0, share_b0, share_a1, share_b1)
             }
             Role::Follower => {
-                let share_a0 = self.executor.new_blind_input::<[u8; 32]>("pms/share_a0")?;
-                let share_b0 = self
-                    .executor
-                    .new_private_input::<[u8; 32]>("pms/share_b0")?;
-                let share_a1 = self.executor.new_blind_input::<[u8; 32]>("pms/share_a1")?;
-                let share_b1 = self
-                    .executor
-                    .new_private_input::<[u8; 32]>("pms/share_b1")?;
+                let share_a0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_blind(share_a0).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_a0).map_err(KeyExchangeError::vm)?;
+
+                let share_b0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_private(share_b0).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_b0).map_err(KeyExchangeError::vm)?;
+
+                let share_a1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_blind(share_a1).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_a1).map_err(KeyExchangeError::vm)?;
+
+                let share_b1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_private(share_b1).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_b1).map_err(KeyExchangeError::vm)?;
 
                 (share_a0, share_b0, share_a1, share_b1)
             }
@@ -290,7 +301,7 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn preprocess(&mut self) -> Result<(), KeyExchangeError> {
+    async fn preprocess(&mut self, ctx: &mut Ctx, vm: &mut V) -> Result<(), KeyExchangeError> {
         let State::Setup {
             share_a0,
             share_b0,
@@ -307,12 +318,11 @@ where
         // Preprocess share conversion and garbled circuits concurrently.
         futures::try_join!(
             async {
-                self.ctx
-                    .try_join(
-                        |ctx| self.converter_0.preprocess(ctx).scope_boxed(),
-                        |ctx| self.converter_1.preprocess(ctx).scope_boxed(),
-                    )
-                    .await??;
+                ctx.try_join(
+                    |ctx| self.converter_0.preprocess(ctx).scope_boxed(),
+                    |ctx| self.converter_1.preprocess(ctx).scope_boxed(),
+                )
+                .await??;
 
                 Ok::<_, KeyExchangeError>(())
             },
@@ -340,7 +350,7 @@ where
                 .private_key
                 .get_or_insert_with(|| SecretKey::random(&mut rand::rngs::OsRng));
 
-            self.ctx.io_mut().send(private_key.public_key()).await?;
+            ctx.io_mut().send(private_key.public_key()).await?;
 
             debug!("sent public key share to leader");
         }
@@ -359,7 +369,7 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn client_key(&mut self) -> Result<PublicKey, KeyExchangeError> {
+    async fn client_key(&mut self, ctx: &mut Ctx) -> Result<PublicKey, KeyExchangeError> {
         if let Role::Leader = self.config.role() {
             let private_key = self
                 .private_key
