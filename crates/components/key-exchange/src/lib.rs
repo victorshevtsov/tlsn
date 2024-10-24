@@ -29,49 +29,53 @@ pub use error::KeyExchangeError;
 pub use exchange::MpcKeyExchange;
 
 use async_trait::async_trait;
-use mpz_garble::value::ValueRef;
+use mpz_memory_core::{binary::U8, Array};
 use p256::PublicKey;
 
 /// Pre-master secret.
 #[derive(Debug, Clone)]
-pub struct Pms(ValueRef);
+pub struct Pms(Array<U8, 32>);
 
 impl Pms {
     /// Creates a new PMS.
-    pub fn new(value: ValueRef) -> Self {
+    pub fn new(value: Array<U8, 32>) -> Self {
         Self(value)
     }
 
     /// Gets the value of the PMS.
-    pub fn into_value(self) -> ValueRef {
+    pub fn into_value(self) -> Array<U8, 32> {
         self.0
     }
 }
 
 /// A trait for the 3-party key exchange protocol.
 #[async_trait]
-pub trait KeyExchange {
+pub trait KeyExchange<Ctx, V> {
     /// Gets the server's public key.
     fn server_key(&self) -> Option<PublicKey>;
 
     /// Sets the server's public key.
-    async fn set_server_key(&mut self, server_key: PublicKey) -> Result<(), KeyExchangeError>;
+    async fn set_server_key(
+        &mut self,
+        ctx: &mut Ctx,
+        server_key: PublicKey,
+    ) -> Result<(), KeyExchangeError>;
 
     /// Computes the client's public key.
     ///
     /// The client's public key in this context is the combined public key (EC
     /// point addition) of the leader's public key and the follower's public
     /// key.
-    async fn client_key(&mut self) -> Result<PublicKey, KeyExchangeError>;
+    async fn client_key(&mut self, ctx: &mut Ctx) -> Result<PublicKey, KeyExchangeError>;
 
     /// Performs any necessary one-time setup, returning a reference to the PMS.
     ///
     /// The PMS will not be assigned until `compute_pms` is called.
-    async fn setup(&mut self) -> Result<Pms, KeyExchangeError>;
+    async fn setup(&mut self, vm: &mut V) -> Result<Pms, KeyExchangeError>;
 
     /// Preprocesses the key exchange.
-    async fn preprocess(&mut self) -> Result<(), KeyExchangeError>;
+    async fn preprocess(&mut self, ctx: &mut Ctx, vm: &mut V) -> Result<(), KeyExchangeError>;
 
     /// Computes the PMS.
-    async fn compute_pms(&mut self) -> Result<Pms, KeyExchangeError>;
+    async fn compute_pms(&mut self, ctx: &mut Ctx) -> Result<Pms, KeyExchangeError>;
 }
