@@ -252,8 +252,8 @@ impl Backend for RustCryptoBackend {
 
     async fn set_server_key_share(&mut self, key: PublicKey) -> Result<(), BackendError> {
         // convert raw server ECDH pubkey to an object
-        let server_pk =
-            ECDHPublicKey::from_sec1_bytes(&key.key).map_err(|_| BackendError::InvalidServerKey)?;
+        let server_pk = ECDHPublicKey::from_sec1_bytes(&key.key)
+            .map_err(|err| BackendError::InvalidServerKey(err.to_string()))?;
 
         let sk = self.ecdh_secret.as_ref().unwrap();
         // perform ECDH, obtain PMS (which is the X coordinate of the resulting
