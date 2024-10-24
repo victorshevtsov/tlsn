@@ -16,13 +16,13 @@ default = ["mock"]
 mock = []
 
 [dependencies]
-mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b8ae7ac" }
-mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b8ae7ac" }
-mpz-fields = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b8ae7ac" }
-mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b8ae7ac", features = [
-    "ideal",
-] }
-mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b8ae7ac" }
+mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
+mpz-vm-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
+mpz-memory-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
+mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
+mpz-fields = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
+mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble", features = ["ideal"] }
+mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
 
 p256 = { workspace = true, features = ["ecdh", "serde"] }
 async-trait = { workspace = true }
@@ -35,7 +35,7 @@ tracing = { workspace = true }
 rand = { workspace = true }
 
 [dev-dependencies]
-mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b8ae7ac", features = [
+mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble", features = [
     "ideal",
 ] }
 
