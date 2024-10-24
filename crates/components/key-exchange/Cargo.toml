@@ -35,7 +35,7 @@ tracing = { workspace = true }
 rand = { workspace = true }
 
 [dev-dependencies]
-mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble", features = [
+mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble", features = [
     "ideal",
 ] }
 
