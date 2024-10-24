@@ -166,6 +166,9 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
                 vm.assign(share_a1, share_1_bytes)
                     .map_err(KeyExchangeError::vm)?;
                 vm.commit(share_a1).map_err(KeyExchangeError::vm)?;
+
+                vm.commit(share_b0).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_b1).map_err(KeyExchangeError::vm)?;
             }
             Role::Follower => {
                 vm.assign(share_b0, share_0_bytes)
@@ -175,6 +178,9 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
                 vm.assign(share_b1, share_1_bytes)
                     .map_err(KeyExchangeError::vm)?;
                 vm.commit(share_b1).map_err(KeyExchangeError::vm)?;
+
+                vm.commit(share_a0).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_a1).map_err(KeyExchangeError::vm)?;
             }
         }
 
@@ -242,28 +248,24 @@ where
 
                 let share_b0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
                 vm.mark_blind(share_b0).map_err(KeyExchangeError::vm)?;
-                vm.commit(share_b0).map_err(KeyExchangeError::vm)?;
 
                 let share_a1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
                 vm.mark_private(share_a1).map_err(KeyExchangeError::vm)?;
 
                 let share_b1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
                 vm.mark_blind(share_b1).map_err(KeyExchangeError::vm)?;
-                vm.commit(share_b1).map_err(KeyExchangeError::vm)?;
 
                 (share_a0, share_b0, share_a1, share_b1)
             }
             Role::Follower => {
                 let share_a0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
                 vm.mark_blind(share_a0).map_err(KeyExchangeError::vm)?;
-                vm.commit(share_a0).map_err(KeyExchangeError::vm)?;
 
                 let share_b0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
                 vm.mark_private(share_b0).map_err(KeyExchangeError::vm)?;
 
                 let share_a1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
                 vm.mark_blind(share_a1).map_err(KeyExchangeError::vm)?;
-                vm.commit(share_a1).map_err(KeyExchangeError::vm)?;
 
                 let share_b1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
                 vm.mark_private(share_b1).map_err(KeyExchangeError::vm)?;
@@ -535,21 +537,17 @@ mod tests {
 
         tokio::try_join!(
             async {
+                leader.compute_pms(&mut ctx_a, &mut gen).await.unwrap();
                 gen.flush(&mut ctx_a).await.unwrap();
                 gen.execute(&mut ctx_a).await.unwrap();
                 gen.flush(&mut ctx_a).await.map_err(KeyExchangeError::vm)
             },
             async {
+                follower.compute_pms(&mut ctx_b, &mut ev).await.unwrap();
                 ev.flush(&mut ctx_b).await.unwrap();
                 ev.execute(&mut ctx_b).await.unwrap();
                 ev.flush(&mut ctx_b).await.map_err(KeyExchangeError::vm)
             }
-        )
-        .unwrap();
-
-        let (_leader_pms, _follower_pms) = tokio::try_join!(
-            leader.compute_pms(&mut ctx_a, &mut gen),
-            follower.compute_pms(&mut ctx_b, &mut ev)
         )
         .unwrap();
 
