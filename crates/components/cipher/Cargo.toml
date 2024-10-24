@@ -12,9 +12,9 @@ edition = "2021"
 name = "cipher"
 
 [dependencies]
-mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
-mpz-vm-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
-mpz-memory-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
+mpz-circuits = { workspace = true }
+mpz-vm-core = { workspace = true }
+mpz-memory-core = { workspace = true }
 
 async-trait = { workspace = true }
 derive_builder = { workspace = true }
@@ -22,11 +22,11 @@ thiserror = { workspace = true }
 aes = { workspace = true }
 
 [dev-dependencies]
-mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
-mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble" }
+mpz-garble = { workspace = true }
+mpz-common = { workspace = true }
+mpz-ot = { workspace = true }
 
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
-mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "refactor/garble", features = ["ideal"] }
 rand = { workspace = true }
 ctr = { workspace = true }
 cipher = { workspace = true }
