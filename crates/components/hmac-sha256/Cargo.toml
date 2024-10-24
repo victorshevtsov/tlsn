@@ -29,10 +29,11 @@ tracing = { workspace = true }
 futures = { workspace = true }
 
 [dev-dependencies]
-criterion = { workspace = true, features = ["async_tokio"] }
-mpz-common = { workspace = true, features = ["test-utils"] }
 mpz-ot = { workspace = true, features = ["ideal"] }
 mpz-garble = { workspace = true }
+mpz-common = { workspace = true, features = ["test-utils"] }
+
+criterion = { workspace = true, features = ["async_tokio"] }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 rand = { workspace = true }
 
