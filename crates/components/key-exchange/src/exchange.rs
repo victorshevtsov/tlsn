@@ -19,7 +19,7 @@ use crate::{
     circuit::build_pms_circuit,
     config::{KeyExchangeConfig, Role},
     point_addition::derive_x_coord_share,
-    KeyExchange, KeyExchangeError, Pms,
+    EqualityCheck, KeyExchange, KeyExchangeError, Pms,
 };
 
 #[derive(Debug)]
@@ -30,7 +30,6 @@ enum State {
         share_b0: Array<U8, 32>,
         share_a1: Array<U8, 32>,
         share_b1: Array<U8, 32>,
-        pms: Array<U8, 32>,
         eq: Array<U8, 32>,
     },
     Preprocessed {
@@ -38,7 +37,6 @@ enum State {
         share_b0: Array<U8, 32>,
         share_a1: Array<U8, 32>,
         share_b1: Array<U8, 32>,
-        pms: Array<U8, 32>,
         eq: Array<U8, 32>,
     },
     Complete,
@@ -97,7 +95,7 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
 }
 
 impl<C0, C1> MpcKeyExchange<C0, C1> {
-    async fn compute_pms_shares<Ctx>(
+    async fn compute_ec_shares<Ctx>(
         &mut self,
         ctx: &mut Ctx,
         server_key: PublicKey,
@@ -114,9 +112,9 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
             + ShareConvert<Ctx, P256>
             + Send,
     {
-        compute_pms_shares(
+        compute_ec_shares(
             ctx,
-            *self.config.role(),
+            self.config.role(),
             &mut self.converter_0,
             &mut self.converter_1,
             server_key,
@@ -132,7 +130,7 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
         vm: &mut V,
         share_0: P256,
         share_1: P256,
-    ) -> Result<Pms, KeyExchangeError>
+    ) -> Result<EqualityCheck, KeyExchangeError>
     where
         V: Vm<Binary>,
     {
@@ -141,7 +139,6 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
             share_b0,
             share_a1,
             share_b1,
-            pms,
             eq,
         } = self.state.take()
         else {
@@ -184,18 +181,9 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
             }
         }
 
-        let eq: [u8; 32] = vm
-            .decode(eq)
-            .map_err(KeyExchangeError::vm)?
-            .await
-            .map_err(KeyExchangeError::vm)?;
+        let check = vm.decode(eq).map_err(KeyExchangeError::vm)?;
 
-        // Eq should be all zeros if pms_1 == pms_2.
-        if eq != [0u8; 32] {
-            return Err(KeyExchangeError::share_conversion("PMS values not equal"));
-        }
-
-        Ok(Pms::new(pms))
+        Ok(EqualityCheck(check))
     }
 }
 
@@ -291,7 +279,6 @@ where
             share_b0,
             share_a1,
             share_b1,
-            pms,
             eq,
         };
 
@@ -305,7 +292,6 @@ where
             share_b0,
             share_a1,
             share_b1,
-            pms,
             eq,
         } = self.state.take()
         else {
@@ -335,7 +321,6 @@ where
             share_b0,
             share_a1,
             share_b1,
-            pms,
             eq,
         };
 
@@ -367,7 +352,11 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn compute_pms(&mut self, ctx: &mut Ctx, vm: &mut V) -> Result<Pms, KeyExchangeError> {
+    async fn compute_pms(
+        &mut self,
+        ctx: &mut Ctx,
+        vm: &mut V,
+    ) -> Result<EqualityCheck, KeyExchangeError> {
         if !self.state.is_preprocessed() {
             return Err(KeyExchangeError::state("not in preprocessed state"));
         }
@@ -391,18 +380,17 @@ where
             .take()
             .ok_or(KeyExchangeError::state("private key not set"))?;
 
-        let (pms_share_0, pms_share_1) = self
-            .compute_pms_shares(ctx, server_key, private_key)
-            .await?;
-        let pms = self.compute_pms_with(vm, pms_share_0, pms_share_1).await?;
+        let (pms_share_0, pms_share_1) =
+            self.compute_ec_shares(ctx, server_key, private_key).await?;
+        let check = self.compute_pms_with(vm, pms_share_0, pms_share_1).await?;
 
         self.state = State::Complete;
 
-        Ok(pms)
+        Ok(check)
     }
 }
 
-async fn compute_pms_shares<
+async fn compute_ec_shares<
     Ctx: Context,
     C0: ShareConvert<Ctx, P256> + Send,
     C1: ShareConvert<Ctx, P256> + Send,
@@ -537,16 +525,24 @@ mod tests {
 
         tokio::try_join!(
             async {
-                leader.compute_pms(&mut ctx_a, &mut gen).await.unwrap();
+                let check = leader.compute_pms(&mut ctx_a, &mut gen).await.unwrap();
                 gen.flush(&mut ctx_a).await.unwrap();
                 gen.execute(&mut ctx_a).await.unwrap();
-                gen.flush(&mut ctx_a).await.map_err(KeyExchangeError::vm)
+                gen.flush(&mut ctx_a)
+                    .await
+                    .map_err(KeyExchangeError::vm)
+                    .unwrap();
+                check.check().await
             },
             async {
-                follower.compute_pms(&mut ctx_b, &mut ev).await.unwrap();
+                let check = follower.compute_pms(&mut ctx_b, &mut ev).await.unwrap();
                 ev.flush(&mut ctx_b).await.unwrap();
                 ev.execute(&mut ctx_b).await.unwrap();
-                ev.flush(&mut ctx_b).await.map_err(KeyExchangeError::vm)
+                ev.flush(&mut ctx_b)
+                    .await
+                    .map_err(KeyExchangeError::vm)
+                    .unwrap();
+                check.check().await
             }
         )
         .unwrap();
@@ -556,7 +552,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_compute_pms_shares() {
+    async fn test_compute_ec_shares() {
         let mut rng = ChaCha12Rng::from_seed([0_u8; 32]);
         let (mut ctx_leader, mut ctx_follower) = test_st_executor(8);
         let (mut leader_converter_0, mut follower_converter_0) = ideal_share_converter();
@@ -576,7 +572,7 @@ mod tests {
 
         let ((leader_share_0, leader_share_1), (follower_share_0, follower_share_1)) =
             tokio::try_join!(
-                compute_pms_shares(
+                compute_ec_shares(
                     &mut ctx_leader,
                     Role::Leader,
                     &mut leader_converter_0,
@@ -584,7 +580,7 @@ mod tests {
                     server_public_key,
                     leader_private_key
                 ),
-                compute_pms_shares(
+                compute_ec_shares(
                     &mut ctx_follower,
                     Role::Follower,
                     &mut follower_converter_0,
@@ -644,30 +640,38 @@ mod tests {
         .unwrap();
 
         let ((mut share_a0, share_a1), (share_b0, share_b1)) = tokio::try_join!(
-            leader.compute_pms_shares(&mut ctx_a, server_public_key, leader_private_key),
-            follower.compute_pms_shares(&mut ctx_b, server_public_key, follower_private_key)
+            leader.compute_ec_shares(&mut ctx_a, server_public_key, leader_private_key),
+            follower.compute_ec_shares(&mut ctx_b, server_public_key, follower_private_key)
         )
         .unwrap();
 
         share_a0 = share_a0 + P256::one();
 
-        tokio::try_join!(
-            async {
-                gen.flush(&mut ctx_a).await.unwrap();
-                gen.execute(&mut ctx_a).await.unwrap();
-                gen.flush(&mut ctx_a).await.map_err(KeyExchangeError::vm)
-            },
-            async {
-                ev.flush(&mut ctx_b).await.unwrap();
-                ev.execute(&mut ctx_b).await.unwrap();
-                ev.flush(&mut ctx_b).await.map_err(KeyExchangeError::vm)
-            }
+        let (check_leader, check_follower) = tokio::try_join!(
+            leader.compute_pms_with(&mut gen, share_a0, share_a1),
+            follower.compute_pms_with(&mut ev, share_b0, share_b1)
         )
         .unwrap();
 
         let (leader_res, follower_res) = tokio::join!(
-            leader.compute_pms_with(&mut gen, share_a0, share_a1),
-            follower.compute_pms_with(&mut ev, share_b0, share_b1)
+            async {
+                gen.flush(&mut ctx_a).await.unwrap();
+                gen.execute(&mut ctx_a).await.unwrap();
+                gen.flush(&mut ctx_a)
+                    .await
+                    .map_err(KeyExchangeError::vm)
+                    .unwrap();
+                check_leader.check().await
+            },
+            async {
+                ev.flush(&mut ctx_b).await.unwrap();
+                ev.execute(&mut ctx_b).await.unwrap();
+                ev.flush(&mut ctx_b)
+                    .await
+                    .map_err(KeyExchangeError::vm)
+                    .unwrap();
+                check_follower.check().await
+            }
         );
 
         let leader_err = leader_res.unwrap_err();
