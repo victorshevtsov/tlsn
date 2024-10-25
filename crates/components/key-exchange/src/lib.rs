@@ -34,7 +34,7 @@ use mpz_memory_core::{binary::U8, Array, DecodeFutureTyped};
 use p256::PublicKey;
 
 /// Pre-master secret.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Pms(Array<U8, 32>);
 
 impl Pms {
@@ -44,7 +44,7 @@ impl Pms {
     }
 
     /// Gets the value of the PMS.
-    pub async fn into_value(self) -> Array<U8, 32> {
+    pub fn into_value(self) -> Array<U8, 32> {
         self.0
     }
 }
