@@ -507,22 +507,6 @@ mod tests {
         leader.private_key = Some(leader_private_key);
         follower.private_key = Some(follower_private_key);
 
-        //        KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
-        //        KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
-        //        tokio::try_join!(
-        //            KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a),
-        //            KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(&mut follower, &mut ctx_b),
-        //        )
-        //        .unwrap();
-        //
-        //        KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
-        //            &mut leader,
-        //            &mut ctx_a,
-        //            server_public_key,
-        //        )
-        //        .await
-        //        .unwrap();
-
         tokio::try_join!(
             async {
                 KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
@@ -677,19 +661,13 @@ mod tests {
             async {
                 gen.flush(&mut ctx_a).await.unwrap();
                 gen.execute(&mut ctx_a).await.unwrap();
-                gen.flush(&mut ctx_a)
-                    .await
-                    .map_err(KeyExchangeError::vm)
-                    .unwrap();
+                gen.flush(&mut ctx_a).await.unwrap();
                 check_leader.check().await
             },
             async {
                 ev.flush(&mut ctx_b).await.unwrap();
                 ev.execute(&mut ctx_b).await.unwrap();
-                ev.flush(&mut ctx_b)
-                    .await
-                    .map_err(KeyExchangeError::vm)
-                    .unwrap();
+                ev.flush(&mut ctx_b).await.unwrap();
                 check_follower.check().await
             }
         );
@@ -706,8 +684,11 @@ mod tests {
         let (mut ctx_a, mut ctx_b) = test_st_executor(8);
         let (gen, ev) = mock_vm();
 
-        let share_0_bytes = [5_u8; 32];
-        let share_1_bytes = [2_u8; 32];
+        let share_a0_bytes = [5_u8; 32];
+        let share_a1_bytes = [2_u8; 32];
+
+        let share_b0_bytes = [3_u8; 32];
+        let share_b1_bytes = [6_u8; 32];
 
         let (res_gen, res_ev) = tokio::join!(
             async move {
@@ -736,10 +717,10 @@ mod tests {
                 let (_, _, eq): (Array<U8, 32>, Array<U8, 32>, Array<U8, 32>) =
                     vm.call(pms_call).unwrap();
 
-                vm.assign(share_a0, share_0_bytes).unwrap();
+                vm.assign(share_a0, share_a0_bytes).unwrap();
                 vm.commit(share_a0).unwrap();
 
-                vm.assign(share_a1, share_1_bytes).unwrap();
+                vm.assign(share_a1, share_a1_bytes).unwrap();
                 vm.commit(share_a1).unwrap();
 
                 vm.commit(share_b0).unwrap();
@@ -778,10 +759,10 @@ mod tests {
                 let (_, _, eq): (Array<U8, 32>, Array<U8, 32>, Array<U8, 32>) =
                     vm.call(pms_call).unwrap();
 
-                vm.assign(share_b0, share_0_bytes).unwrap();
+                vm.assign(share_b0, share_b0_bytes).unwrap();
                 vm.commit(share_b0).unwrap();
 
-                vm.assign(share_b1, share_1_bytes).unwrap();
+                vm.assign(share_b1, share_b1_bytes).unwrap();
                 vm.commit(share_b1).unwrap();
 
                 vm.commit(share_a0).unwrap();
