@@ -507,24 +507,37 @@ mod tests {
         leader.private_key = Some(leader_private_key);
         follower.private_key = Some(follower_private_key);
 
-        KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
-        KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
-        tokio::try_join!(
-            KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a),
-            KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(&mut follower, &mut ctx_b),
-        )
-        .unwrap();
-
-        KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
-            &mut leader,
-            &mut ctx_a,
-            server_public_key,
-        )
-        .await
-        .unwrap();
+        //        KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
+        //        KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
+        //        tokio::try_join!(
+        //            KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a),
+        //            KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(&mut follower, &mut ctx_b),
+        //        )
+        //        .unwrap();
+        //
+        //        KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
+        //            &mut leader,
+        //            &mut ctx_a,
+        //            server_public_key,
+        //        )
+        //        .await
+        //        .unwrap();
 
         tokio::try_join!(
             async {
+                KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
+                KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a)
+                    .await
+                    .unwrap();
+
+                KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
+                    &mut leader,
+                    &mut ctx_a,
+                    server_public_key,
+                )
+                .await
+                .unwrap();
+
                 let check = leader.compute_pms(&mut ctx_a, &mut gen).await.unwrap();
                 gen.flush(&mut ctx_a).await.unwrap();
                 gen.execute(&mut ctx_a).await.unwrap();
@@ -535,6 +548,13 @@ mod tests {
                 check.check().await
             },
             async {
+                KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
+                KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(
+                    &mut follower,
+                    &mut ctx_b,
+                )
+                .await
+                .unwrap();
                 let check = follower.compute_pms(&mut ctx_b, &mut ev).await.unwrap();
                 ev.flush(&mut ctx_b).await.unwrap();
                 ev.execute(&mut ctx_b).await.unwrap();
@@ -679,6 +699,108 @@ mod tests {
 
         assert!(matches!(leader_err.kind(), ErrorRepr::ShareConversion(_)));
         assert!(matches!(follower_err.kind(), ErrorRepr::ShareConversion(_)));
+    }
+
+    #[tokio::test]
+    async fn test_circuit() {
+        let (mut ctx_a, mut ctx_b) = test_st_executor(8);
+        let (gen, ev) = mock_vm();
+
+        let share_0_bytes = [5_u8; 32];
+        let share_1_bytes = [2_u8; 32];
+
+        let (res_gen, res_ev) = tokio::join!(
+            async move {
+                let mut vm = gen;
+                let share_a0: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_private(share_a0).unwrap();
+
+                let share_b0: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_blind(share_b0).unwrap();
+
+                let share_a1: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_private(share_a1).unwrap();
+
+                let share_b1: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_blind(share_b1).unwrap();
+
+                let pms_circuit = build_pms_circuit();
+                let pms_call = CallBuilder::new(pms_circuit)
+                    .arg(share_a0)
+                    .arg(share_b0)
+                    .arg(share_a1)
+                    .arg(share_b1)
+                    .build()
+                    .unwrap();
+
+                let (_, _, eq): (Array<U8, 32>, Array<U8, 32>, Array<U8, 32>) =
+                    vm.call(pms_call).unwrap();
+
+                vm.assign(share_a0, share_0_bytes).unwrap();
+                vm.commit(share_a0).unwrap();
+
+                vm.assign(share_a1, share_1_bytes).unwrap();
+                vm.commit(share_a1).unwrap();
+
+                vm.commit(share_b0).unwrap();
+                vm.commit(share_b1).unwrap();
+
+                let check = vm.decode(eq).unwrap();
+
+                vm.flush(&mut ctx_a).await.unwrap();
+                vm.execute(&mut ctx_a).await.unwrap();
+                vm.flush(&mut ctx_a).await.unwrap();
+                check.await
+            },
+            async {
+                let mut vm = ev;
+                let share_a0: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_blind(share_a0).unwrap();
+
+                let share_b0: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_private(share_b0).unwrap();
+
+                let share_a1: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_blind(share_a1).unwrap();
+
+                let share_b1: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_private(share_b1).unwrap();
+
+                let pms_circuit = build_pms_circuit();
+                let pms_call = CallBuilder::new(pms_circuit)
+                    .arg(share_a0)
+                    .arg(share_b0)
+                    .arg(share_a1)
+                    .arg(share_b1)
+                    .build()
+                    .unwrap();
+
+                let (_, _, eq): (Array<U8, 32>, Array<U8, 32>, Array<U8, 32>) =
+                    vm.call(pms_call).unwrap();
+
+                vm.assign(share_b0, share_0_bytes).unwrap();
+                vm.commit(share_b0).unwrap();
+
+                vm.assign(share_b1, share_1_bytes).unwrap();
+                vm.commit(share_b1).unwrap();
+
+                vm.commit(share_a0).unwrap();
+                vm.commit(share_a1).unwrap();
+
+                let check = vm.decode(eq).unwrap();
+
+                vm.flush(&mut ctx_b).await.unwrap();
+                vm.execute(&mut ctx_b).await.unwrap();
+                vm.flush(&mut ctx_b).await.unwrap();
+                check.await
+            }
+        );
+
+        let res_gen = res_gen.unwrap();
+        let res_ev = res_ev.unwrap();
+
+        assert_eq!(res_gen, res_ev);
+        assert_eq!(res_gen, [0_u8; 32]);
     }
 
     fn create_pair() -> (
