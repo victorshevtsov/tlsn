@@ -9,7 +9,7 @@ use mpz_memory_core::{
     Array, Memory, MemoryExt, View, ViewExt,
 };
 use mpz_share_conversion::{ShareConversionError, ShareConvert};
-use mpz_vm_core::{CallBuilder, Execute, Vm, VmExt};
+use mpz_vm_core::{CallBuilder, Vm, VmExt};
 use p256::{EncodedPoint, PublicKey, SecretKey};
 use serio::{stream::IoStreamExt, SinkExt};
 use std::fmt::Debug;
@@ -123,8 +123,8 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
         .await
     }
 
-    // Computes the PMS using both parties' shares, performing an equality check
-    // to ensure the shares are equal.
+    // Computes the PMS using both parties' shares, performing an equality check to ensure the
+    // shares are equal.
     async fn compute_pms_with<V>(
         &mut self,
         vm: &mut V,
@@ -191,7 +191,7 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
 impl<Ctx, V, C0, C1> KeyExchange<Ctx, V> for MpcKeyExchange<C0, C1>
 where
     Ctx: Context,
-    V: Vm<Binary> + Memory<Binary> + View<Binary> + Execute<Ctx> + Send,
+    V: Vm<Binary> + Memory<Binary> + View<Binary> + Send,
     C0: Allocate + Preprocess<Ctx, Error = ShareConversionError> + ShareConvert<Ctx, P256> + Send,
     C1: Allocate + Preprocess<Ctx, Error = ShareConversionError> + ShareConvert<Ctx, P256> + Send,
 {
@@ -404,9 +404,9 @@ async fn compute_ec_shares<
 ) -> Result<(P256, P256), KeyExchangeError> {
     // Compute the leader's/follower's share of the pre-master secret.
     //
-    // We need to mimic the [diffie-hellman](p256::ecdh::diffie_hellman) function
-    // without the [SharedSecret](p256::ecdh::SharedSecret) wrapper, because
-    // this makes it harder to get the result as an EC curve point.
+    // We need to mimic the [diffie-hellman](p256::ecdh::diffie_hellman) function without the
+    // [SharedSecret](p256::ecdh::SharedSecret) wrapper, because this makes it harder to get the
+    // result as an EC curve point.
     let shared_secret = {
         let public_projective = server_key.to_projective();
         (public_projective * private_key.to_nonzero_scalar().as_ref()).to_affine()
@@ -441,6 +441,7 @@ mod tests {
     use mpz_memory_core::correlated::Delta;
     use mpz_ot::ideal::cot::{ideal_cot_with_delta, IdealCOTReceiver, IdealCOTSender};
     use mpz_share_conversion::ideal::{ideal_share_converter, IdealShareConverter};
+    use mpz_vm_core::Execute;
     use p256::{NonZeroScalar, PublicKey, SecretKey};
     use rand::rngs::StdRng;
     use rand_chacha::ChaCha12Rng;

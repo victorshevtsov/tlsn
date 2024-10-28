@@ -49,7 +49,7 @@ impl Pms {
     }
 }
 
-/// Holds the future which checks that both parties behaved honestly.
+/// Checks that both parties behaved honestly.
 #[must_use]
 #[derive(Debug)]
 pub struct EqualityCheck(DecodeFutureTyped<BitVec, [u8; 32]>);
