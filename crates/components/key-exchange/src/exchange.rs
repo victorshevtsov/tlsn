@@ -2,10 +2,14 @@
 
 use async_trait::async_trait;
 use mpz_common::{scoped_futures::ScopedFutureExt, Allocate, Context, Preprocess};
-use mpz_garble::{value::ValueRef, Decode, Execute, Load, Memory};
 
 use mpz_fields::{p256::P256, Field};
+use mpz_memory_core::{
+    binary::{Binary, U8},
+    Array, Memory, MemoryExt, View, ViewExt,
+};
 use mpz_share_conversion::{ShareConversionError, ShareConvert};
+use mpz_vm_core::{CallBuilder, Vm, VmExt};
 use p256::{EncodedPoint, PublicKey, SecretKey};
 use serio::{stream::IoStreamExt, SinkExt};
 use std::fmt::Debug;
@@ -14,31 +18,26 @@ use tracing::{debug, instrument};
 use crate::{
     circuit::build_pms_circuit,
     config::{KeyExchangeConfig, Role},
-    error::ErrorKind,
     point_addition::derive_x_coord_share,
-    KeyExchange, KeyExchangeError, Pms,
+    EqualityCheck, KeyExchange, KeyExchangeError, Pms,
 };
 
 #[derive(Debug)]
 enum State {
     Initialized,
     Setup {
-        share_a0: ValueRef,
-        share_b0: ValueRef,
-        share_a1: ValueRef,
-        share_b1: ValueRef,
-        pms_0: ValueRef,
-        pms_1: ValueRef,
-        eq: ValueRef,
+        share_a0: Array<U8, 32>,
+        share_b0: Array<U8, 32>,
+        share_a1: Array<U8, 32>,
+        share_b1: Array<U8, 32>,
+        eq: Array<U8, 32>,
     },
     Preprocessed {
-        share_a0: ValueRef,
-        share_b0: ValueRef,
-        share_a1: ValueRef,
-        share_b1: ValueRef,
-        pms_0: ValueRef,
-        pms_1: ValueRef,
-        eq: ValueRef,
+        share_a0: Array<U8, 32>,
+        share_b0: Array<U8, 32>,
+        share_a1: Array<U8, 32>,
+        share_b1: Array<U8, 32>,
+        eq: Array<U8, 32>,
     },
     Complete,
     Error,
@@ -59,14 +58,11 @@ impl State {
 /// Can be either a leader or a follower depending on the `role` field in
 /// [`KeyExchangeConfig`].
 #[derive(Debug)]
-pub struct MpcKeyExchange<Ctx, C0, C1, E> {
-    ctx: Ctx,
+pub struct MpcKeyExchange<C0, C1> {
     /// Share conversion protocol 0.
     converter_0: C0,
     /// Share conversion protocol 1.
     converter_1: C1,
-    /// MPC executor.
-    executor: E,
     /// The private key of the party behind this instance, either follower or
     /// leader.
     private_key: Option<SecretKey>,
@@ -78,28 +74,18 @@ pub struct MpcKeyExchange<Ctx, C0, C1, E> {
     state: State,
 }
 
-impl<Ctx, C0, C1, E> MpcKeyExchange<Ctx, C0, C1, E> {
+impl<C0, C1> MpcKeyExchange<C0, C1> {
     /// Creates a new [`MpcKeyExchange`].
     ///
     /// # Arguments
     ///
     /// * `config` - Key exchange configuration.
-    /// * `ctx` - Thread context.
     /// * `converter_0` - Share conversion protocol instance 0.
     /// * `converter_1` - Share conversion protocol instance 1.
-    /// * `executor` - MPC executor.
-    pub fn new(
-        config: KeyExchangeConfig,
-        ctx: Ctx,
-        converter_0: C0,
-        converter_1: C1,
-        executor: E,
-    ) -> Self {
+    pub fn new(config: KeyExchangeConfig, converter_0: C0, converter_1: C1) -> Self {
         Self {
-            ctx,
             converter_0,
             converter_1,
-            executor,
             private_key: None,
             server_key: None,
             config,
@@ -108,21 +94,27 @@ impl<Ctx, C0, C1, E> MpcKeyExchange<Ctx, C0, C1, E> {
     }
 }
 
-impl<Ctx, C0, C1, E> MpcKeyExchange<Ctx, C0, C1, E>
-where
-    Ctx: Context,
-    E: Execute + Load + Memory + Decode + Send,
-    C0: ShareConvert<Ctx, P256> + Send,
-    C1: ShareConvert<Ctx, P256> + Send,
-{
-    async fn compute_pms_shares(
+impl<C0, C1> MpcKeyExchange<C0, C1> {
+    async fn compute_ec_shares<Ctx>(
         &mut self,
+        ctx: &mut Ctx,
         server_key: PublicKey,
         private_key: SecretKey,
-    ) -> Result<(P256, P256), KeyExchangeError> {
-        compute_pms_shares(
-            &mut self.ctx,
-            *self.config.role(),
+    ) -> Result<(P256, P256), KeyExchangeError>
+    where
+        Ctx: Context,
+        C0: Allocate
+            + Preprocess<Ctx, Error = ShareConversionError>
+            + ShareConvert<Ctx, P256>
+            + Send,
+        C1: Allocate
+            + Preprocess<Ctx, Error = ShareConversionError>
+            + ShareConvert<Ctx, P256>
+            + Send,
+    {
+        compute_ec_shares(
+            ctx,
+            self.config.role(),
             &mut self.converter_0,
             &mut self.converter_1,
             server_key,
@@ -131,20 +123,22 @@ where
         .await
     }
 
-    // Computes the PMS using both parties' shares, performing an equality check
-    // to ensure the shares are equal.
-    async fn compute_pms_with(
+    // Computes the PMS using both parties' shares, performing an equality check to ensure the
+    // shares are equal.
+    async fn compute_pms_with<V>(
         &mut self,
+        vm: &mut V,
         share_0: P256,
         share_1: P256,
-    ) -> Result<Pms, KeyExchangeError> {
+    ) -> Result<EqualityCheck, KeyExchangeError>
+    where
+        V: Vm<Binary>,
+    {
         let State::Preprocessed {
             share_a0,
             share_b0,
             share_a1,
             share_b1,
-            pms_0,
-            pms_1,
             eq,
         } = self.state.take()
         else {
@@ -162,50 +156,42 @@ where
 
         match self.config.role() {
             Role::Leader => {
-                self.executor.assign(&share_a0, share_0_bytes)?;
-                self.executor.assign(&share_a1, share_1_bytes)?;
+                vm.assign(share_a0, share_0_bytes)
+                    .map_err(KeyExchangeError::vm)?;
+                vm.commit(share_a0).map_err(KeyExchangeError::vm)?;
+
+                vm.assign(share_a1, share_1_bytes)
+                    .map_err(KeyExchangeError::vm)?;
+                vm.commit(share_a1).map_err(KeyExchangeError::vm)?;
+
+                vm.commit(share_b0).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_b1).map_err(KeyExchangeError::vm)?;
             }
             Role::Follower => {
-                self.executor.assign(&share_b0, share_0_bytes)?;
-                self.executor.assign(&share_b1, share_1_bytes)?;
+                vm.assign(share_b0, share_0_bytes)
+                    .map_err(KeyExchangeError::vm)?;
+                vm.commit(share_b0).map_err(KeyExchangeError::vm)?;
+
+                vm.assign(share_b1, share_1_bytes)
+                    .map_err(KeyExchangeError::vm)?;
+                vm.commit(share_b1).map_err(KeyExchangeError::vm)?;
+
+                vm.commit(share_a0).map_err(KeyExchangeError::vm)?;
+                vm.commit(share_a1).map_err(KeyExchangeError::vm)?;
             }
         }
 
-        self.executor
-            .execute(
-                build_pms_circuit(),
-                &[share_a0, share_b0, share_a1, share_b1],
-                &[pms_0.clone(), pms_1, eq.clone()],
-            )
-            .await?;
+        let check = vm.decode(eq).map_err(KeyExchangeError::vm)?;
 
-        let eq: [u8; 32] = self
-            .executor
-            .decode(&[eq])
-            .await?
-            .pop()
-            .expect("output 0 is eq")
-            .try_into()
-            .expect("eq is 32 bytes");
-
-        // Eq should be all zeros if pms_1 == pms_2.
-        if eq != [0u8; 32] {
-            return Err(KeyExchangeError::new(
-                ErrorKind::ShareConversion,
-                "PMS values not equal",
-            ));
-        }
-
-        // Both parties use pms_0 as the pre-master secret.
-        Ok(Pms::new(pms_0))
+        Ok(EqualityCheck(check))
     }
 }
 
 #[async_trait]
-impl<Ctx, C0, C1, E> KeyExchange for MpcKeyExchange<Ctx, C0, C1, E>
+impl<Ctx, V, C0, C1> KeyExchange<Ctx, V> for MpcKeyExchange<C0, C1>
 where
     Ctx: Context,
-    E: Execute + Load + Memory + Decode + Send,
+    V: Vm<Binary> + Memory<Binary> + View<Binary> + Send,
     C0: Allocate + Preprocess<Ctx, Error = ShareConversionError> + ShareConvert<Ctx, P256> + Send,
     C1: Allocate + Preprocess<Ctx, Error = ShareConversionError> + ShareConvert<Ctx, P256> + Send,
 {
@@ -213,13 +199,20 @@ where
         self.server_key
     }
 
-    async fn set_server_key(&mut self, server_key: PublicKey) -> Result<(), KeyExchangeError> {
+    async fn set_server_key(
+        &mut self,
+        ctx: &mut Ctx,
+        server_key: PublicKey,
+    ) -> Result<(), KeyExchangeError>
+    where
+        Ctx: Context,
+    {
         let Role::Leader = self.config.role() else {
             return Err(KeyExchangeError::role("follower cannot set server key"));
         };
 
         // Send server public key to follower.
-        self.ctx.io_mut().send(server_key).await?;
+        ctx.io_mut().send(server_key).await?;
 
         self.server_key = Some(server_key);
 
@@ -227,7 +220,7 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn setup(&mut self) -> Result<Pms, KeyExchangeError> {
+    fn setup(&mut self, vm: &mut V) -> Result<Pms, KeyExchangeError> {
         let State::Initialized = self.state.take() else {
             return Err(KeyExchangeError::state("not in initialized state"));
         };
@@ -238,92 +231,79 @@ where
 
         let (share_a0, share_b0, share_a1, share_b1) = match self.config.role() {
             Role::Leader => {
-                let share_a0 = self
-                    .executor
-                    .new_private_input::<[u8; 32]>("pms/share_a0")?;
-                let share_b0 = self.executor.new_blind_input::<[u8; 32]>("pms/share_b0")?;
-                let share_a1 = self
-                    .executor
-                    .new_private_input::<[u8; 32]>("pms/share_a1")?;
-                let share_b1 = self.executor.new_blind_input::<[u8; 32]>("pms/share_b1")?;
+                let share_a0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_private(share_a0).map_err(KeyExchangeError::vm)?;
+
+                let share_b0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_blind(share_b0).map_err(KeyExchangeError::vm)?;
+
+                let share_a1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_private(share_a1).map_err(KeyExchangeError::vm)?;
+
+                let share_b1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_blind(share_b1).map_err(KeyExchangeError::vm)?;
 
                 (share_a0, share_b0, share_a1, share_b1)
             }
             Role::Follower => {
-                let share_a0 = self.executor.new_blind_input::<[u8; 32]>("pms/share_a0")?;
-                let share_b0 = self
-                    .executor
-                    .new_private_input::<[u8; 32]>("pms/share_b0")?;
-                let share_a1 = self.executor.new_blind_input::<[u8; 32]>("pms/share_a1")?;
-                let share_b1 = self
-                    .executor
-                    .new_private_input::<[u8; 32]>("pms/share_b1")?;
+                let share_a0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_blind(share_a0).map_err(KeyExchangeError::vm)?;
+
+                let share_b0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_private(share_b0).map_err(KeyExchangeError::vm)?;
+
+                let share_a1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_blind(share_a1).map_err(KeyExchangeError::vm)?;
+
+                let share_b1: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
+                vm.mark_private(share_b1).map_err(KeyExchangeError::vm)?;
 
                 (share_a0, share_b0, share_a1, share_b1)
             }
         };
 
-        let pms_0 = self.executor.new_output::<[u8; 32]>("pms_0")?;
-        let pms_1 = self.executor.new_output::<[u8; 32]>("pms_1")?;
-        let eq = self.executor.new_output::<[u8; 32]>("eq")?;
+        let pms_circuit = build_pms_circuit();
+        let pms_call = CallBuilder::new(pms_circuit)
+            .arg(share_a0)
+            .arg(share_b0)
+            .arg(share_a1)
+            .arg(share_b1)
+            .build()
+            .map_err(KeyExchangeError::vm)?;
+
+        let (pms, _, eq): (Array<U8, 32>, Array<U8, 32>, Array<U8, 32>) =
+            vm.call(pms_call).map_err(KeyExchangeError::vm)?;
 
         self.state = State::Setup {
             share_a0,
             share_b0,
             share_a1,
             share_b1,
-            pms_0: pms_0.clone(),
-            pms_1,
             eq,
         };
 
-        Ok(Pms::new(pms_0))
+        Ok(Pms::new(pms))
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn preprocess(&mut self) -> Result<(), KeyExchangeError> {
+    async fn preprocess(&mut self, ctx: &mut Ctx) -> Result<(), KeyExchangeError> {
         let State::Setup {
             share_a0,
             share_b0,
             share_a1,
             share_b1,
-            pms_0,
-            pms_1,
             eq,
         } = self.state.take()
         else {
             return Err(KeyExchangeError::state("not in setup state"));
         };
 
-        // Preprocess share conversion and garbled circuits concurrently.
-        futures::try_join!(
-            async {
-                self.ctx
-                    .try_join(
-                        |ctx| self.converter_0.preprocess(ctx).scope_boxed(),
-                        |ctx| self.converter_1.preprocess(ctx).scope_boxed(),
-                    )
-                    .await??;
-
-                Ok::<_, KeyExchangeError>(())
-            },
-            async {
-                self.executor
-                    .load(
-                        build_pms_circuit(),
-                        &[
-                            share_a0.clone(),
-                            share_b0.clone(),
-                            share_a1.clone(),
-                            share_b1.clone(),
-                        ],
-                        &[pms_0.clone(), pms_1.clone(), eq.clone()],
-                    )
-                    .await?;
-
-                Ok::<_, KeyExchangeError>(())
-            }
-        )?;
+        // Preprocess share conversion.
+        ctx.try_join(
+            |ctx| self.converter_0.preprocess(ctx).scope_boxed(),
+            |ctx| self.converter_1.preprocess(ctx).scope_boxed(),
+        )
+        .await??;
 
         // Follower can forward their key share immediately.
         if let Role::Follower = self.config.role() {
@@ -331,7 +311,7 @@ where
                 .private_key
                 .get_or_insert_with(|| SecretKey::random(&mut rand::rngs::OsRng));
 
-            self.ctx.io_mut().send(private_key.public_key()).await?;
+            ctx.io_mut().send(private_key.public_key()).await?;
 
             debug!("sent public key share to leader");
         }
@@ -341,8 +321,6 @@ where
             share_b0,
             share_a1,
             share_b1,
-            pms_0,
-            pms_1,
             eq,
         };
 
@@ -350,7 +328,7 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn client_key(&mut self) -> Result<PublicKey, KeyExchangeError> {
+    async fn client_key(&mut self, ctx: &mut Ctx) -> Result<PublicKey, KeyExchangeError> {
         if let Role::Leader = self.config.role() {
             let private_key = self
                 .private_key
@@ -358,7 +336,7 @@ where
             let public_key = private_key.public_key();
 
             // Receive public key share from follower.
-            let follower_public_key: PublicKey = self.ctx.io_mut().expect_next().await?;
+            let follower_public_key: PublicKey = ctx.io_mut().expect_next().await?;
 
             debug!("received public key share from follower");
 
@@ -374,7 +352,11 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn compute_pms(&mut self) -> Result<Pms, KeyExchangeError> {
+    async fn compute_pms(
+        &mut self,
+        ctx: &mut Ctx,
+        vm: &mut V,
+    ) -> Result<EqualityCheck, KeyExchangeError> {
         if !self.state.is_preprocessed() {
             return Err(KeyExchangeError::state("not in preprocessed state"));
         }
@@ -385,7 +367,7 @@ where
                 .ok_or_else(|| KeyExchangeError::state("server public key not set"))?,
             Role::Follower => {
                 // Receive server public key from leader.
-                let server_key = self.ctx.io_mut().expect_next().await?;
+                let server_key = ctx.io_mut().expect_next().await?;
 
                 self.server_key = Some(server_key);
 
@@ -398,16 +380,17 @@ where
             .take()
             .ok_or(KeyExchangeError::state("private key not set"))?;
 
-        let (pms_share_0, pms_share_1) = self.compute_pms_shares(server_key, private_key).await?;
-        let pms = self.compute_pms_with(pms_share_0, pms_share_1).await?;
+        let (pms_share_0, pms_share_1) =
+            self.compute_ec_shares(ctx, server_key, private_key).await?;
+        let check = self.compute_pms_with(vm, pms_share_0, pms_share_1).await?;
 
         self.state = State::Complete;
 
-        Ok(pms)
+        Ok(check)
     }
 }
 
-async fn compute_pms_shares<
+async fn compute_ec_shares<
     Ctx: Context,
     C0: ShareConvert<Ctx, P256> + Send,
     C1: ShareConvert<Ctx, P256> + Send,
@@ -421,9 +404,9 @@ async fn compute_pms_shares<
 ) -> Result<(P256, P256), KeyExchangeError> {
     // Compute the leader's/follower's share of the pre-master secret.
     //
-    // We need to mimic the [diffie-hellman](p256::ecdh::diffie_hellman) function
-    // without the [SharedSecret](p256::ecdh::SharedSecret) wrapper, because
-    // this makes it harder to get the result as an EC curve point.
+    // We need to mimic the [diffie-hellman](p256::ecdh::diffie_hellman) function without the
+    // [SharedSecret](p256::ecdh::SharedSecret) wrapper, because this makes it harder to get the
+    // result as an EC curve point.
     let shared_secret = {
         let public_projective = server_key.to_projective();
         (public_projective * private_key.to_nonzero_scalar().as_ref()).to_affine()
@@ -449,64 +432,26 @@ async fn compute_pms_shares<
 
 #[cfg(test)]
 mod tests {
+    use crate::error::ErrorRepr;
+
     use super::*;
 
-    use mpz_common::executor::{test_st_executor, STExecutor};
-    use mpz_garble::protocol::deap::mock::{create_mock_deap_vm, MockFollower, MockLeader};
+    use mpz_common::executor::{test_st_executor, TestSTExecutor};
+    use mpz_garble::protocol::semihonest::{Evaluator, Generator};
+    use mpz_memory_core::correlated::Delta;
+    use mpz_ot::ideal::cot::{ideal_cot_with_delta, IdealCOTReceiver, IdealCOTSender};
     use mpz_share_conversion::ideal::{ideal_share_converter, IdealShareConverter};
+    use mpz_vm_core::Execute;
     use p256::{NonZeroScalar, PublicKey, SecretKey};
+    use rand::rngs::StdRng;
     use rand_chacha::ChaCha12Rng;
     use rand_core::SeedableRng;
-    use serio::channel::MemoryDuplex;
-
-    #[allow(clippy::type_complexity)]
-    fn create_pair() -> (
-        MpcKeyExchange<
-            STExecutor<MemoryDuplex>,
-            IdealShareConverter,
-            IdealShareConverter,
-            MockLeader,
-        >,
-        MpcKeyExchange<
-            STExecutor<MemoryDuplex>,
-            IdealShareConverter,
-            IdealShareConverter,
-            MockFollower,
-        >,
-    ) {
-        let (leader_ctx, follower_ctx) = test_st_executor(8);
-        let (leader_converter_0, follower_converter_0) = ideal_share_converter();
-        let (follower_converter_1, leader_converter_1) = ideal_share_converter();
-        let (leader_vm, follower_vm) = create_mock_deap_vm();
-
-        let leader = MpcKeyExchange::new(
-            KeyExchangeConfig::builder()
-                .role(Role::Leader)
-                .build()
-                .unwrap(),
-            leader_ctx,
-            leader_converter_0,
-            leader_converter_1,
-            leader_vm,
-        );
-
-        let follower = MpcKeyExchange::new(
-            KeyExchangeConfig::builder()
-                .role(Role::Follower)
-                .build()
-                .unwrap(),
-            follower_ctx,
-            follower_converter_0,
-            follower_converter_1,
-            follower_vm,
-        );
-
-        (leader, follower)
-    }
 
     #[tokio::test]
     async fn test_key_exchange() {
         let mut rng = ChaCha12Rng::from_seed([0_u8; 32]);
+        let (mut ctx_a, mut ctx_b) = test_st_executor(8);
+        let (mut gen, mut ev) = mock_vm();
 
         let leader_private_key = SecretKey::random(&mut rng);
         let follower_private_key = SecretKey::random(&mut rng);
@@ -517,11 +462,25 @@ mod tests {
         leader.private_key = Some(leader_private_key.clone());
         follower.private_key = Some(follower_private_key.clone());
 
-        tokio::try_join!(leader.setup(), follower.setup()).unwrap();
-        tokio::try_join!(leader.preprocess(), follower.preprocess()).unwrap();
+        KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
+        KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
+        tokio::try_join!(
+            KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a),
+            KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(&mut follower, &mut ctx_b),
+        )
+        .unwrap();
 
-        let client_public_key = leader.client_key().await.unwrap();
-        leader.set_server_key(server_public_key).await.unwrap();
+        let client_public_key =
+            KeyExchange::<_, Generator<IdealCOTSender>>::client_key(&mut leader, &mut ctx_a)
+                .await
+                .unwrap();
+        KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
+            &mut leader,
+            &mut ctx_a,
+            server_public_key,
+        )
+        .await
+        .unwrap();
 
         let expected_client_public_key = PublicKey::from_affine(
             (leader_private_key.public_key().to_projective()
@@ -536,6 +495,8 @@ mod tests {
     #[tokio::test]
     async fn test_compute_pms() {
         let mut rng = ChaCha12Rng::from_seed([0_u8; 32]);
+        let (mut ctx_a, mut ctx_b) = test_st_executor(8);
+        let (mut gen, mut ev) = mock_vm();
 
         let leader_private_key = SecretKey::random(&mut rng);
         let follower_private_key = SecretKey::random(&mut rng);
@@ -547,20 +508,56 @@ mod tests {
         leader.private_key = Some(leader_private_key);
         follower.private_key = Some(follower_private_key);
 
-        tokio::try_join!(leader.setup(), follower.setup()).unwrap();
-        tokio::try_join!(leader.preprocess(), follower.preprocess()).unwrap();
+        tokio::try_join!(
+            async {
+                KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
+                KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a)
+                    .await
+                    .unwrap();
 
-        leader.set_server_key(server_public_key).await.unwrap();
+                KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
+                    &mut leader,
+                    &mut ctx_a,
+                    server_public_key,
+                )
+                .await
+                .unwrap();
 
-        let (_leader_pms, _follower_pms) =
-            tokio::try_join!(leader.compute_pms(), follower.compute_pms()).unwrap();
+                let check = leader.compute_pms(&mut ctx_a, &mut gen).await.unwrap();
+                gen.flush(&mut ctx_a).await.unwrap();
+                gen.execute(&mut ctx_a).await.unwrap();
+                gen.flush(&mut ctx_a)
+                    .await
+                    .map_err(KeyExchangeError::vm)
+                    .unwrap();
+                check.check().await
+            },
+            async {
+                KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
+                KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(
+                    &mut follower,
+                    &mut ctx_b,
+                )
+                .await
+                .unwrap();
+                let check = follower.compute_pms(&mut ctx_b, &mut ev).await.unwrap();
+                ev.flush(&mut ctx_b).await.unwrap();
+                ev.execute(&mut ctx_b).await.unwrap();
+                ev.flush(&mut ctx_b)
+                    .await
+                    .map_err(KeyExchangeError::vm)
+                    .unwrap();
+                check.check().await
+            }
+        )
+        .unwrap();
 
         assert_eq!(leader.server_key.unwrap(), server_public_key);
         assert_eq!(follower.server_key.unwrap(), server_public_key);
     }
 
     #[tokio::test]
-    async fn test_compute_pms_shares() {
+    async fn test_compute_ec_shares() {
         let mut rng = ChaCha12Rng::from_seed([0_u8; 32]);
         let (mut ctx_leader, mut ctx_follower) = test_st_executor(8);
         let (mut leader_converter_0, mut follower_converter_0) = ideal_share_converter();
@@ -580,7 +577,7 @@ mod tests {
 
         let ((leader_share_0, leader_share_1), (follower_share_0, follower_share_1)) =
             tokio::try_join!(
-                compute_pms_shares(
+                compute_ec_shares(
                     &mut ctx_leader,
                     Role::Leader,
                     &mut leader_converter_0,
@@ -588,7 +585,7 @@ mod tests {
                     server_public_key,
                     leader_private_key
                 ),
-                compute_pms_shares(
+                compute_ec_shares(
                     &mut ctx_follower,
                     Role::Follower,
                     &mut follower_converter_0,
@@ -618,6 +615,8 @@ mod tests {
     #[tokio::test]
     async fn test_compute_pms_fail() {
         let mut rng = ChaCha12Rng::from_seed([0_u8; 32]);
+        let (mut ctx_a, mut ctx_b) = test_st_executor(8);
+        let (mut gen, mut ev) = mock_vm();
 
         let leader_private_key = SecretKey::random(&mut rng);
         let follower_private_key = SecretKey::random(&mut rng);
@@ -629,28 +628,200 @@ mod tests {
         leader.private_key = Some(leader_private_key.clone());
         follower.private_key = Some(follower_private_key.clone());
 
-        tokio::try_join!(leader.setup(), follower.setup()).unwrap();
-        tokio::try_join!(leader.preprocess(), follower.preprocess()).unwrap();
+        KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
+        KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
+        tokio::try_join!(
+            KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a),
+            KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(&mut follower, &mut ctx_b),
+        )
+        .unwrap();
 
-        leader.set_server_key(server_public_key).await.unwrap();
+        KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
+            &mut leader,
+            &mut ctx_a,
+            server_public_key,
+        )
+        .await
+        .unwrap();
 
         let ((mut share_a0, share_a1), (share_b0, share_b1)) = tokio::try_join!(
-            leader.compute_pms_shares(server_public_key, leader_private_key),
-            follower.compute_pms_shares(server_public_key, follower_private_key)
+            leader.compute_ec_shares(&mut ctx_a, server_public_key, leader_private_key),
+            follower.compute_ec_shares(&mut ctx_b, server_public_key, follower_private_key)
         )
         .unwrap();
 
         share_a0 = share_a0 + P256::one();
 
+        let (check_leader, check_follower) = tokio::try_join!(
+            leader.compute_pms_with(&mut gen, share_a0, share_a1),
+            follower.compute_pms_with(&mut ev, share_b0, share_b1)
+        )
+        .unwrap();
+
         let (leader_res, follower_res) = tokio::join!(
-            leader.compute_pms_with(share_a0, share_a1),
-            follower.compute_pms_with(share_b0, share_b1)
+            async {
+                gen.flush(&mut ctx_a).await.unwrap();
+                gen.execute(&mut ctx_a).await.unwrap();
+                gen.flush(&mut ctx_a).await.unwrap();
+                check_leader.check().await
+            },
+            async {
+                ev.flush(&mut ctx_b).await.unwrap();
+                ev.execute(&mut ctx_b).await.unwrap();
+                ev.flush(&mut ctx_b).await.unwrap();
+                check_follower.check().await
+            }
         );
 
         let leader_err = leader_res.unwrap_err();
         let follower_err = follower_res.unwrap_err();
 
-        assert!(matches!(leader_err.kind(), ErrorKind::ShareConversion));
-        assert!(matches!(follower_err.kind(), ErrorKind::ShareConversion));
+        assert!(matches!(leader_err.kind(), ErrorRepr::ShareConversion(_)));
+        assert!(matches!(follower_err.kind(), ErrorRepr::ShareConversion(_)));
+    }
+
+    #[tokio::test]
+    async fn test_circuit() {
+        let (mut ctx_a, mut ctx_b) = test_st_executor(8);
+        let (gen, ev) = mock_vm();
+
+        let share_a0_bytes = [5_u8; 32];
+        let share_a1_bytes = [2_u8; 32];
+
+        let share_b0_bytes = [3_u8; 32];
+        let share_b1_bytes = [6_u8; 32];
+
+        let (res_gen, res_ev) = tokio::join!(
+            async move {
+                let mut vm = gen;
+                let share_a0: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_private(share_a0).unwrap();
+
+                let share_b0: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_blind(share_b0).unwrap();
+
+                let share_a1: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_private(share_a1).unwrap();
+
+                let share_b1: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_blind(share_b1).unwrap();
+
+                let pms_circuit = build_pms_circuit();
+                let pms_call = CallBuilder::new(pms_circuit)
+                    .arg(share_a0)
+                    .arg(share_b0)
+                    .arg(share_a1)
+                    .arg(share_b1)
+                    .build()
+                    .unwrap();
+
+                let (_, _, eq): (Array<U8, 32>, Array<U8, 32>, Array<U8, 32>) =
+                    vm.call(pms_call).unwrap();
+
+                vm.assign(share_a0, share_a0_bytes).unwrap();
+                vm.commit(share_a0).unwrap();
+
+                vm.assign(share_a1, share_a1_bytes).unwrap();
+                vm.commit(share_a1).unwrap();
+
+                vm.commit(share_b0).unwrap();
+                vm.commit(share_b1).unwrap();
+
+                let check = vm.decode(eq).unwrap();
+
+                vm.flush(&mut ctx_a).await.unwrap();
+                vm.execute(&mut ctx_a).await.unwrap();
+                vm.flush(&mut ctx_a).await.unwrap();
+                check.await
+            },
+            async {
+                let mut vm = ev;
+                let share_a0: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_blind(share_a0).unwrap();
+
+                let share_b0: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_private(share_b0).unwrap();
+
+                let share_a1: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_blind(share_a1).unwrap();
+
+                let share_b1: Array<U8, 32> = vm.alloc().unwrap();
+                vm.mark_private(share_b1).unwrap();
+
+                let pms_circuit = build_pms_circuit();
+                let pms_call = CallBuilder::new(pms_circuit)
+                    .arg(share_a0)
+                    .arg(share_b0)
+                    .arg(share_a1)
+                    .arg(share_b1)
+                    .build()
+                    .unwrap();
+
+                let (_, _, eq): (Array<U8, 32>, Array<U8, 32>, Array<U8, 32>) =
+                    vm.call(pms_call).unwrap();
+
+                vm.assign(share_b0, share_b0_bytes).unwrap();
+                vm.commit(share_b0).unwrap();
+
+                vm.assign(share_b1, share_b1_bytes).unwrap();
+                vm.commit(share_b1).unwrap();
+
+                vm.commit(share_a0).unwrap();
+                vm.commit(share_a1).unwrap();
+
+                let check = vm.decode(eq).unwrap();
+
+                vm.flush(&mut ctx_b).await.unwrap();
+                vm.execute(&mut ctx_b).await.unwrap();
+                vm.flush(&mut ctx_b).await.unwrap();
+                check.await
+            }
+        );
+
+        let res_gen = res_gen.unwrap();
+        let res_ev = res_ev.unwrap();
+
+        assert_eq!(res_gen, res_ev);
+        assert_eq!(res_gen, [0_u8; 32]);
+    }
+
+    fn create_pair() -> (
+        MpcKeyExchange<IdealShareConverter, IdealShareConverter>,
+        MpcKeyExchange<IdealShareConverter, IdealShareConverter>,
+    ) {
+        let (leader_converter_0, follower_converter_0) = ideal_share_converter();
+        let (follower_converter_1, leader_converter_1) = ideal_share_converter();
+
+        let leader = MpcKeyExchange::new(
+            KeyExchangeConfig::builder()
+                .role(Role::Leader)
+                .build()
+                .unwrap(),
+            leader_converter_0,
+            leader_converter_1,
+        );
+
+        let follower = MpcKeyExchange::new(
+            KeyExchangeConfig::builder()
+                .role(Role::Follower)
+                .build()
+                .unwrap(),
+            follower_converter_0,
+            follower_converter_1,
+        );
+
+        (leader, follower)
+    }
+
+    fn mock_vm() -> (Generator<IdealCOTSender>, Evaluator<IdealCOTReceiver>) {
+        let mut rng = StdRng::seed_from_u64(0);
+        let delta = Delta::random(&mut rng);
+
+        let (cot_send, cot_recv) = ideal_cot_with_delta(delta.into_inner());
+
+        let gen = Generator::new(cot_send, [0u8; 16], delta);
+        let ev = Evaluator::new(cot_recv);
+
+        (gen, ev)
     }
 }
