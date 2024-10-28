@@ -10,12 +10,12 @@ use crate::{
 use async_trait::async_trait;
 use cipher::{Cipher, CipherCircuit};
 use futures::{SinkExt, TryFutureExt};
-use hmac_sha256::Prf;
+use hmac_sha256::{Prf, PrfOutput};
 use ke::KeyExchange;
 use key_exchange as ke;
 use ludi::Context as LudiContext;
 use mpz_common::Context;
-use mpz_memory_core::binary::Binary;
+use mpz_memory_core::{binary::Binary, Memory, MemoryExt, View, ViewExt};
 use mpz_vm_core::Vm;
 use std::collections::VecDeque;
 use tls_backend::{
@@ -45,7 +45,7 @@ use actor::MpcTlsLeaderCtrl;
 pub type LeaderCtrl = MpcTlsLeaderCtrl;
 
 /// MPC-TLS leader.
-pub struct MpcTlsLeader<K, P, C, U> {
+pub struct MpcTlsLeader<'a, 'b, K, P, C, U, Ctx, V> {
     config: MpcTlsLeaderConfig,
     channel: MpcTlsChannel,
 
@@ -55,6 +55,8 @@ pub struct MpcTlsLeader<K, P, C, U> {
     prf: P,
     cipher: C,
     hash: U,
+    ctx: &'a mut Ctx,
+    vm: &'b mut V,
     /// When set, notifies the backend that there are TLS messages which need to
     /// be decrypted.
     notifier: BackendNotifier,
@@ -64,14 +66,18 @@ pub struct MpcTlsLeader<K, P, C, U> {
     buffer: VecDeque<OpaqueMessage>,
     /// Whether we have already committed to the transcript.
     committed: bool,
+    prf_out: Option<PrfOutput>,
 }
 
-impl<K, P, C, U> MpcTlsLeader<K, P, C, U>
+impl<'a, 'b, K, P, C, U, Ctx, V> MpcTlsLeader<'a, 'b, K, P, C, U, Ctx, V>
 where
-    K: KeyExchange + Send,
-    P: Prf + Send,
+    Self: Send,
+    K: KeyExchange<Ctx, V> + Send,
+    P: Prf<V> + Send,
     C: Send,
-    U: Send,
+    U: UniversalHash<Ctx> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     /// Create a new leader instance
     pub fn new(
@@ -81,6 +87,8 @@ where
         prf: P,
         cipher: C,
         hash: U,
+        ctx: &'a mut Ctx,
+        vm: &'b mut V,
     ) -> Self {
         let is_decrypting = !config.defer_decryption_from_start();
 
@@ -92,23 +100,19 @@ where
             prf,
             cipher,
             hash,
+            ctx,
+            vm,
             notifier: BackendNotifier::new(),
             is_decrypting,
             buffer: VecDeque::new(),
             committed: false,
+            prf_out: None,
         }
     }
 
     /// Performs any one-time setup operations.
     #[instrument(level = "debug", skip_all, err)]
-    pub async fn setup<Circ, Ctx, V>(&mut self) -> Result<(), MpcTlsError>
-    where
-        U: UniversalHash<Ctx>,
-        C: Cipher<Circ, V>,
-        Circ: CipherCircuit,
-        Ctx: Context,
-        V: Vm<Binary>,
-    {
+    pub async fn setup(&mut self) -> Result<(), MpcTlsError> {
         todo!()
     }
 
@@ -191,12 +195,15 @@ where
 }
 
 #[async_trait]
-impl<K, P, C, U> Backend for MpcTlsLeader<K, P, C, U>
+impl<'a, 'b, K, P, C, U, Ctx, V> Backend for MpcTlsLeader<'a, 'b, K, P, C, U, Ctx, V>
 where
-    K: KeyExchange + Send,
-    P: Prf + Send,
+    Self: Send,
+    K: KeyExchange<Ctx, V> + Send,
+    P: Prf<V> + Send,
     C: Send,
-    U: Send,
+    U: UniversalHash<Ctx> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     async fn set_protocol_version(&mut self, version: ProtocolVersion) -> Result<(), BackendError> {
         let Ke {
@@ -239,13 +246,10 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn get_client_key_share(&mut self) -> Result<PublicKey, BackendError>
-    where
-        K: KeyExchange,
-    {
+    async fn get_client_key_share(&mut self) -> Result<PublicKey, BackendError> {
         let pk = self
             .ke
-            .client_key()
+            .client_key(self.ctx)
             .await
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
@@ -281,7 +285,7 @@ where
             *server_public_key = Some(key);
 
             self.ke
-                .set_server_key(server_key)
+                .set_server_key(self.ctx, server_key)
                 .await
                 .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
@@ -342,13 +346,20 @@ where
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
-        let vd = self
-            .prf
-            .set_sf_hash(hash)
-            .await
+        self.prf
+            .set_sf_hash(self.vm, hash)
             .map_err(|err| BackendError::ServerFinished(err.to_string()))?;
 
-        Ok(vd.to_vec())
+        let sf_vd = self.prf_out.expect("Prf output should be set").sf_vd;
+
+        let sf_vd = self
+            .vm
+            .decode(sf_vd)
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?
+            .await
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
+
+        Ok(sf_vd.to_vec())
     }
 
     #[instrument(level = "debug", skip_all, err)]
@@ -366,13 +377,20 @@ where
             .await
             .map_err(|err| BackendError::InternalError(err.to_string()))?;
 
-        let vd = self
-            .prf
-            .set_cf_hash(hash)
+        self.prf
+            .set_cf_hash(self.vm, hash)
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
+
+        let cf_vd = self.prf_out.expect("Prf output should be set").cf_vd;
+
+        let cf_vd = self
+            .vm
+            .decode(cf_vd)
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?
             .await
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
-        Ok(vd.to_vec())
+        Ok(cf_vd.to_vec())
     }
 
     #[instrument(level = "debug", skip_all, err)]
@@ -415,13 +433,12 @@ where
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
         self.ke
-            .compute_pms()
+            .compute_pms(self.ctx, self.vm)
             .await
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
         self.prf
-            .set_server_random(server_random.0)
-            .await
+            .set_server_random(self.vm, server_random.0)
             .map_err(|err| BackendError::Prf(err.to_string()))?;
 
         // futures::try_join!(self.encrypter.start(), self.decrypter.start())?;

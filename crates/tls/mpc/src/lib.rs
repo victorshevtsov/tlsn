@@ -9,18 +9,18 @@
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
-mod components;
+//mod components;
 mod config;
 mod error;
 //pub(crate) mod follower;
 pub(crate) mod leader;
 pub mod msg;
 
+mod aead;
 mod decode;
 //mod dump;
-//mod tag;
 
-pub use components::build_components;
+//pub use components::build_components;
 pub use config::{
     MpcTlsCommonConfig, MpcTlsCommonConfigBuilder, MpcTlsCommonConfigBuilderError,
     MpcTlsFollowerConfig, MpcTlsFollowerConfigBuilder, MpcTlsFollowerConfigBuilderError,
