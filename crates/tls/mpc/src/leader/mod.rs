@@ -45,7 +45,7 @@ use actor::MpcTlsLeaderCtrl;
 pub type LeaderCtrl = MpcTlsLeaderCtrl;
 
 /// MPC-TLS leader.
-pub struct MpcTlsLeader<'a, 'b, K, P, C, U, Ctx, V> {
+pub struct MpcTlsLeader<K, P, C, U, Ctx, V> {
     config: MpcTlsLeaderConfig,
     channel: MpcTlsChannel,
 
@@ -55,8 +55,8 @@ pub struct MpcTlsLeader<'a, 'b, K, P, C, U, Ctx, V> {
     prf: P,
     cipher: C,
     hash: U,
-    ctx: &'a mut Ctx,
-    vm: &'b mut V,
+    ctx: Ctx,
+    vm: V,
     /// When set, notifies the backend that there are TLS messages which need to
     /// be decrypted.
     notifier: BackendNotifier,
@@ -69,7 +69,7 @@ pub struct MpcTlsLeader<'a, 'b, K, P, C, U, Ctx, V> {
     prf_out: Option<PrfOutput>,
 }
 
-impl<'a, 'b, K, P, C, U, Ctx, V> MpcTlsLeader<'a, 'b, K, P, C, U, Ctx, V>
+impl<K, P, C, U, Ctx, V> MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<Ctx, V> + Send,
@@ -87,8 +87,8 @@ where
         prf: P,
         cipher: C,
         hash: U,
-        ctx: &'a mut Ctx,
-        vm: &'b mut V,
+        ctx: Ctx,
+        vm: V,
     ) -> Self {
         let is_decrypting = !config.defer_decryption_from_start();
 
@@ -195,7 +195,7 @@ where
 }
 
 #[async_trait]
-impl<'a, 'b, K, P, C, U, Ctx, V> Backend for MpcTlsLeader<'a, 'b, K, P, C, U, Ctx, V>
+impl<K, P, C, U, Ctx, V> Backend for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<Ctx, V> + Send,
@@ -249,7 +249,7 @@ where
     async fn get_client_key_share(&mut self) -> Result<PublicKey, BackendError> {
         let pk = self
             .ke
-            .client_key(self.ctx)
+            .client_key(&mut self.ctx)
             .await
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
@@ -285,7 +285,7 @@ where
             *server_public_key = Some(key);
 
             self.ke
-                .set_server_key(self.ctx, server_key)
+                .set_server_key(&mut self.ctx, server_key)
                 .await
                 .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
@@ -347,7 +347,7 @@ where
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
         self.prf
-            .set_sf_hash(self.vm, hash)
+            .set_sf_hash(&mut self.vm, hash)
             .map_err(|err| BackendError::ServerFinished(err.to_string()))?;
 
         let sf_vd = self.prf_out.expect("Prf output should be set").sf_vd;
@@ -378,7 +378,7 @@ where
             .map_err(|err| BackendError::InternalError(err.to_string()))?;
 
         self.prf
-            .set_cf_hash(self.vm, hash)
+            .set_cf_hash(&mut self.vm, hash)
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let cf_vd = self.prf_out.expect("Prf output should be set").cf_vd;
@@ -432,13 +432,18 @@ where
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
-        self.ke
-            .compute_pms(self.ctx, self.vm)
+        let eq = self
+            .ke
+            .compute_pms(&mut self.ctx, &mut self.vm)
+            .await
+            .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
+
+        eq.check()
             .await
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
         self.prf
-            .set_server_random(self.vm, server_random.0)
+            .set_server_random(&mut self.vm, server_random.0)
             .map_err(|err| BackendError::Prf(err.to_string()))?;
 
         // futures::try_join!(self.encrypter.start(), self.decrypter.start())?;
