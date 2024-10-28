@@ -1,16 +1,15 @@
-//! This module implements a secure two-party computation protocol for adding
-//! two private EC points and secret-sharing the resulting x coordinate (the
-//! shares are field elements of the field underlying the elliptic curve).
-//! This protocol has semi-honest security.
+//! This module implements a secure two-party computation protocol for adding two private EC points
+//! and secret-sharing the resulting x coordinate (the shares are field elements of the field
+//! underlying the elliptic curve). This protocol has semi-honest security.
 //!
-//! The protocol is described in <https://docs.tlsnotary.org/protocol/notarization/key_exchange.html>
+//! The protocol is described in
+//! <https://docs.tlsnotary.org/protocol/notarization/key_exchange.html>
 
+use crate::{config::Role, KeyExchangeError};
 use mpz_common::Context;
 use mpz_fields::{p256::P256, Field};
 use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive};
 use p256::EncodedPoint;
-
-use crate::{config::Role, error::ErrorKind, KeyExchangeError};
 
 /// Derives the x-coordinate share of an elliptic curve point.
 pub(crate) async fn derive_x_coord_share<Ctx, C>(
@@ -50,13 +49,11 @@ where
 /// Decomposes the x and y coordinates of a SEC1 encoded point.
 fn decompose_point(point: EncodedPoint) -> Result<[P256; 2], KeyExchangeError> {
     // Coordinates are stored as big-endian bytes.
-    let mut x: [u8; 32] = (*point.x().ok_or(KeyExchangeError::new(
-        ErrorKind::Key,
-        "key share is an identity point",
-    ))?)
+    let mut x: [u8; 32] = (*point
+        .x()
+        .ok_or(KeyExchangeError::key("key share is an identity point"))?)
     .into();
-    let mut y: [u8; 32] = (*point.y().ok_or(KeyExchangeError::new(
-        ErrorKind::Key,
+    let mut y: [u8; 32] = (*point.y().ok_or(KeyExchangeError::key(
         "key share is an identity point or compressed",
     ))?)
     .into();
