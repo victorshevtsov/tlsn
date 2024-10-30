@@ -1,3 +1,8 @@
+use hmac_sha256::PrfError;
+use key_exchange::KeyExchangeError;
+use mpz_memory_core::DecodeError;
+use tlsn_universal_hash::UniversalHashError;
+
 use crate::leader::state::StateError;
 use std::{error::Error, fmt::Display};
 
@@ -22,6 +27,8 @@ enum ErrorRepr {
     Encrypt(Box<dyn Error + Send + Sync + 'static>),
     /// An error occurred during decryption
     Decrypt(Box<dyn Error + Send + Sync + 'static>),
+    /// An error occurred during tag computation
+    Tag(Box<dyn Error + Send + Sync + 'static>),
     /// An error related to configuration.
     Config(Box<dyn Error + Send + Sync + 'static>),
     /// Peer misbehaved somehow, perhaps maliciously.
@@ -46,6 +53,7 @@ impl Display for ErrorRepr {
             ErrorRepr::Prf(error) => write!(f, "{error}"),
             ErrorRepr::Encrypt(error) => write!(f, "{error}"),
             ErrorRepr::Decrypt(error) => write!(f, "{error}"),
+            ErrorRepr::Tag(error) => write!(f, "{error}"),
             ErrorRepr::Config(error) => write!(f, "{error}"),
             ErrorRepr::PeerMisbehaved(error) => write!(f, "{error}"),
             ErrorRepr::Vm(error) => write!(f, "{error}"),
@@ -106,6 +114,13 @@ impl MpcTlsError {
         Self(ErrorRepr::Decrypt(err.into()))
     }
 
+    pub(crate) fn tag<E>(err: E) -> MpcTlsError
+    where
+        E: Into<Box<dyn Error + Send + Sync + 'static>>,
+    {
+        Self(ErrorRepr::Tag(err.into()))
+    }
+
     pub(crate) fn config<E>(err: E) -> MpcTlsError
     where
         E: Into<Box<dyn Error + Send + Sync + 'static>>,
@@ -152,5 +167,35 @@ impl MpcTlsError {
 impl From<StateError> for MpcTlsError {
     fn from(value: StateError) -> Self {
         MpcTlsError::state(value)
+    }
+}
+
+impl From<KeyExchangeError> for MpcTlsError {
+    fn from(value: KeyExchangeError) -> Self {
+        MpcTlsError::key_exchange(value)
+    }
+}
+
+impl From<DecodeError> for MpcTlsError {
+    fn from(value: DecodeError) -> Self {
+        MpcTlsError::decode(value)
+    }
+}
+
+impl From<PrfError> for MpcTlsError {
+    fn from(value: PrfError) -> Self {
+        MpcTlsError::prf(value)
+    }
+}
+
+impl From<UniversalHashError> for MpcTlsError {
+    fn from(value: UniversalHashError) -> Self {
+        MpcTlsError::tag(value)
+    }
+}
+
+impl From<std::io::Error> for MpcTlsError {
+    fn from(value: std::io::Error) -> Self {
+        MpcTlsError::io(value)
     }
 }

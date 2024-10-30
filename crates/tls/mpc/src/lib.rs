@@ -16,8 +16,8 @@ mod error;
 pub(crate) mod leader;
 pub mod msg;
 
-mod aead;
 mod decode;
+mod record_layer;
 //mod dump;
 
 //pub use components::build_components;

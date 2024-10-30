@@ -129,14 +129,16 @@ impl<C: CipherCircuit> Keystream<C> {
         V: Vm<Binary>,
         <<C as CipherCircuit>::Counter as Repr<Binary>>::Clear: From<[u8; 4]>,
     {
-        let mut block = self.chunk(1)?;
+        if self.block_len() == 0 {
+            return Err(CipherError::new("keystream is empty"));
+        }
 
-        let nonce = block
+        let nonce = self
             .explicit_nonces
             .pop_front()
             .expect("Keystream block should be present");
 
-        let ctr = block
+        let ctr = self
             .counters
             .pop_front()
             .expect("Keystream block should be present");
@@ -148,7 +150,7 @@ impl<C: CipherCircuit> Keystream<C> {
             .map_err(CipherError::new)?;
         vm.commit(ctr).map_err(CipherError::new)?;
 
-        let output = block
+        let output = self
             .outputs
             .pop_front()
             .expect("Keystream block should be present");
