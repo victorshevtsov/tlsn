@@ -114,6 +114,48 @@ impl<C: CipherCircuit> Keystream<C> {
         Ok(cipher_output)
     }
 
+    /// Computes a j0 block.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The necessary virtual machine.
+    /// * `explicit_nonce` - The TLS explicit nonce.
+    pub fn j0<V>(
+        &mut self,
+        vm: &mut V,
+        explicit_nonce: <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear,
+    ) -> Result<<C as CipherCircuit>::Block, CipherError>
+    where
+        V: Vm<Binary>,
+        <<C as CipherCircuit>::Counter as Repr<Binary>>::Clear: From<[u8; 4]>,
+    {
+        let mut block = self.chunk(1)?;
+
+        let nonce = block
+            .explicit_nonces
+            .pop_front()
+            .expect("Keystream block should be present");
+
+        let ctr = block
+            .counters
+            .pop_front()
+            .expect("Keystream block should be present");
+
+        vm.assign(nonce, explicit_nonce).map_err(CipherError::new)?;
+        vm.commit(nonce).map_err(CipherError::new)?;
+
+        vm.assign(ctr, 1_u32.to_be_bytes().into())
+            .map_err(CipherError::new)?;
+        vm.commit(ctr).map_err(CipherError::new)?;
+
+        let output = block
+            .outputs
+            .pop_front()
+            .expect("Keystream block should be present");
+
+        Ok(output)
+    }
+
     /// Cuts off blocks of the keystream.
     ///
     /// # Arguments
