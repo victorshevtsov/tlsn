@@ -142,8 +142,9 @@ where
     <<C as CipherCircuit>::Counter as Repr<Binary>>::Clear: From<[u8; 4]>,
     <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear: Copy,
 {
-    let purported_tag = ciphertext
+    let tag_bytes = ciphertext
         .split_off(ciphertext.len() - <<C as CipherCircuit>::Block as StaticSize<Binary>>::SIZE);
+    let purported_tag = Tag::new(tag_bytes);
 
     let len = ciphertext.len();
     let block_size = <<C as CipherCircuit>::Block as StaticSize<Binary>>::SIZE / 8;
@@ -165,12 +166,13 @@ where
         .map_err(MpcTlsError::decrypt)?;
 
     let plaintext = cipher_output
-        .assign(vm, explicit_nonce, start_counter, ciphertext)
+        .assign(vm, explicit_nonce, start_counter, ciphertext.clone())
         .map_err(MpcTlsError::decrypt)?;
 
     let plaintext = Plaintext {
         role,
         j0,
+        ciphertext,
         purported_tag,
         plaintext,
         aad,
@@ -182,6 +184,7 @@ where
 pub(crate) struct Plaintext {
     role: TlsRole,
     j0: OneTimePadShared,
+    ciphertext: Vec<u8>,
     purported_tag: Tag,
     plaintext: Vector<U8>,
     aad: Vec<u8>,
@@ -197,7 +200,29 @@ impl Plaintext {
         Ctx: Context,
         U: UniversalHash<Ctx>,
     {
-        todo!()
+        let Plaintext {
+            role,
+            j0,
+            ciphertext,
+            purported_tag,
+            plaintext,
+            aad,
+        } = self;
+
+        let j0 = j0.decode().await?;
+        let ciphertext = build_ghash_data(aad, ciphertext);
+        let hash = universal_hash.finalize(ciphertext, ctx).await?;
+
+        let tag_share = j0
+            .into_iter()
+            .zip(hash.into_iter())
+            .map(|(a, b)| a ^ b)
+            .collect();
+        let tag_share = Tag::new(tag_share);
+
+        verify_tag(ctx, role, tag_share, purported_tag).await?;
+
+        Ok(plaintext)
     }
 }
 
