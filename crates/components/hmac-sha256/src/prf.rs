@@ -123,6 +123,7 @@ where
 
         vm.mark_public(server_random).map_err(PrfError::vm)?;
 
+        #[allow(clippy::type_complexity)]
         let (
             client_write_key,
             server_write_key,
