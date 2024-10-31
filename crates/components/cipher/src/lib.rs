@@ -158,6 +158,16 @@ impl<C: CipherCircuit> Keystream<C> {
         Ok(output)
     }
 
+    /// Cuts off sufficient blocks of the keystream for a specified byte length.
+    ///
+    /// # Arguments
+    ///
+    /// * `byte_count` - The minimum number of bytes required.
+    pub fn chunk_sufficient(&mut self, byte_count: usize) -> Result<Keystream<C>, CipherError> {
+        let block_count = byte_count / 16 + (byte_count % 16 != 0) as usize;
+        self.chunk(block_count)
+    }
+
     /// Cuts off blocks of the keystream.
     ///
     /// # Arguments
