@@ -1,21 +1,19 @@
 use crate::{
     error::MpcTlsError,
     msg::{
-        ClientFinishedVd, CloseConnection, Commit, CommitMessage, ComputeKeyExchange, DecryptAlert,
-        DecryptMessage, DecryptServerFinished, EncryptAlert, EncryptClientFinished, EncryptMessage,
+        ClientFinishedVd, CommitMessage, ComputeKeyExchange,
         MpcTlsMessage, ServerFinishedVd,
     },
     Direction, MpcTlsChannel, MpcTlsLeaderConfig,
 };
 use async_trait::async_trait;
-use cipher::{Cipher, CipherCircuit};
 use futures::{SinkExt, TryFutureExt};
 use hmac_sha256::{Prf, PrfOutput};
 use ke::KeyExchange;
 use key_exchange as ke;
 use ludi::Context as LudiContext;
 use mpz_common::Context;
-use mpz_memory_core::{binary::Binary, Memory, MemoryExt, View, ViewExt};
+use mpz_memory_core::{binary::Binary, Memory, MemoryExt, View};
 use mpz_vm_core::Vm;
 use std::collections::VecDeque;
 use tls_backend::{
@@ -27,16 +25,14 @@ use tls_core::{
     ke::ServerKxDetails,
     key::PublicKey,
     msgs::{
-        alert::AlertMessagePayload,
-        codec::Codec,
-        enums::{AlertDescription, CipherSuite, ContentType, NamedGroup, ProtocolVersion},
+        enums::{CipherSuite, ContentType, NamedGroup, ProtocolVersion},
         handshake::Random,
         message::{OpaqueMessage, PlainMessage},
     },
     suites::SupportedCipherSuite,
 };
 use tlsn_universal_hash::UniversalHash;
-use tracing::{debug, instrument, trace};
+use tracing::{instrument, trace};
 
 mod actor;
 use actor::MpcTlsLeaderCtrl;

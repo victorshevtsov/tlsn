@@ -4,29 +4,14 @@ use crate::{
     record_layer::aead::transmute,
     MpcTlsError, TlsRole,
 };
-use cipher::{aes::Aes128, CipherCircuit, Keystream};
+use cipher::{CipherCircuit, Keystream};
 use mpz_circuits::types::ToBinaryRepr;
 use mpz_common::Context;
-use mpz_core::{
-    bitvec::BitVec,
-    commit::{Decommitment, HashCommit},
-    hash::Hash,
-};
 use mpz_memory_core::{
-    binary::{Binary, U8},
-    Array, ClearValue, DecodeFutureTyped, FromRaw, Memory, MemoryExt, Repr, Slice, StaticSize,
-    ToRaw, Vector, View, ViewExt,
+    binary::{Binary, U8}, MemoryExt, Repr, StaticSize, Vector, View, ViewExt,
 };
-use mpz_vm_core::{Vm, VmExt};
-use serde::{Deserialize, Serialize};
-use serio::{stream::IoStreamExt, SinkExt};
-use std::{
-    future::Future,
-    marker::PhantomData,
-    ops::{Add, BitXor},
-};
+use mpz_vm_core::Vm;
 use tlsn_universal_hash::UniversalHash;
-use tracing::instrument;
 
 pub(crate) fn decrypt<V, C>(
     vm: &mut V,

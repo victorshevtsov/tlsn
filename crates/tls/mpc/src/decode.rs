@@ -1,15 +1,14 @@
-use std::{ops::BitXor, sync::Arc};
+use std::sync::Arc;
 
 use crate::{MpcTlsError, TlsRole};
 use mpz_circuits::{types::ValueType, Circuit, CircuitBuilder, Tracer};
 use mpz_core::bitvec::BitVec;
 use mpz_memory_core::{
-    binary::{Binary, U8},
-    ClearValue, DecodeFutureTyped, Memory, MemoryExt, MemoryType, Repr, StaticSize, Vector, View,
+    binary::{Binary, U8}, DecodeFutureTyped, MemoryExt, StaticSize, Vector, View,
     ViewExt,
 };
 use mpz_vm_core::{CallBuilder, Vm, VmExt};
-use rand::{distributions::Standard, prelude::Distribution, thread_rng, Rng, RngCore};
+use rand::{prelude::Distribution, thread_rng, RngCore};
 
 pub(crate) struct Decode {
     role: TlsRole,
