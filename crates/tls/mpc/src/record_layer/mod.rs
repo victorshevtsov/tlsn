@@ -1,2 +1,1 @@
 mod aead;
-mod tag;
