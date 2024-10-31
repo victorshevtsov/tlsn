@@ -1,3 +1,5 @@
+//! Message authentication.
+
 use crate::{MpcTlsError, TlsRole};
 use mpz_common::Context;
 use mpz_core::{

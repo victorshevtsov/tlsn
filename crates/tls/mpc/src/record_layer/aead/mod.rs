@@ -1,10 +1,12 @@
+//! Handles authenticated encryption, decryption and tags.
+
 use mpz_memory_core::{
     binary::{Binary, U8},
     FromRaw, Slice, StaticSize, ToRaw, Vector,
 };
 
-mod decrypt;
-mod encrypt;
+pub(crate) mod decrypt;
+pub(crate) mod encrypt;
 mod tag;
 
 fn transmute<T>(value: T) -> Vector<U8>

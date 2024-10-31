@@ -1,19 +1,8 @@
 use derive_builder::Builder;
 
-static DEFAULT_OPAQUE_TX_TRANSCRIPT_ID: &str = "opaque_tx";
-static DEFAULT_OPAQUE_RX_TRANSCRIPT_ID: &str = "opaque_rx";
-static DEFAULT_TX_TRANSCRIPT_ID: &str = "tx";
-static DEFAULT_RX_TRANSCRIPT_ID: &str = "rx";
-const DEFAULT_TRANSCRIPT_MAX_SIZE: usize = 1 << 14;
-
 /// Transcript configuration.
 #[derive(Debug, Clone, Builder)]
 pub struct TranscriptConfig {
-    /// The transcript id.
-    id: String,
-    /// The "opaque" transcript id, used for parts of the transcript that are
-    /// not part of the application data.
-    opaque_id: String,
     /// The maximum number of bytes that can be written to the transcript during
     /// the **online** phase, i.e. while the MPC-TLS connection is active.
     max_online_size: usize,
@@ -28,8 +17,6 @@ impl TranscriptConfig {
         let mut builder = TranscriptConfigBuilder::default();
 
         builder
-            .id(DEFAULT_TX_TRANSCRIPT_ID.to_string())
-            .opaque_id(DEFAULT_OPAQUE_TX_TRANSCRIPT_ID.to_string())
             .max_online_size(DEFAULT_TRANSCRIPT_MAX_SIZE)
             .max_offline_size(0);
 
@@ -41,8 +28,6 @@ impl TranscriptConfig {
         let mut builder = TranscriptConfigBuilder::default();
 
         builder
-            .id(DEFAULT_RX_TRANSCRIPT_ID.to_string())
-            .opaque_id(DEFAULT_OPAQUE_RX_TRANSCRIPT_ID.to_string())
             .max_online_size(0)
             .max_offline_size(DEFAULT_TRANSCRIPT_MAX_SIZE);
 
@@ -52,16 +37,6 @@ impl TranscriptConfig {
     /// Creates a new builder for `TranscriptConfig`.
     pub fn builder() -> TranscriptConfigBuilder {
         TranscriptConfigBuilder::default()
-    }
-
-    /// Returns the transcript id.
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Returns the "opaque" transcript id.
-    pub fn opaque_id(&self) -> &str {
-        &self.opaque_id
     }
 
     /// Returns the maximum number of bytes that can be written to the

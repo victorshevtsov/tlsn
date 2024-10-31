@@ -1,3 +1,5 @@
+//! Encryption of plaintext.
+
 use crate::{
     decode::{Decode, OneTimePadShared},
     record_layer::aead::{
@@ -16,13 +18,14 @@ use mpz_memory_core::{
 use mpz_vm_core::Vm;
 use tlsn_universal_hash::UniversalHash;
 
+#[instrument(level = "trace", skip_all, err)]
 pub(crate) fn encrypt<V, C>(
     vm: &mut V,
     role: TlsRole,
     j0: <C as CipherCircuit>::Block,
     ciphertext: Vector<U8>,
     aad: Vec<u8>,
-) -> Result<Tlstext, MpcTlsError>
+) -> Result<TlsText, MpcTlsError>
 where
     V: Vm<Binary> + Memory<Binary> + View<Binary>,
     C: CipherCircuit,
@@ -33,7 +36,7 @@ where
 
     let ciphertext = vm.decode(ciphertext).map_err(MpcTlsError::vm)?;
 
-    let text = Tlstext {
+    let text = TlsText {
         j0,
         ciphertext,
         aad,
@@ -42,13 +45,14 @@ where
     Ok(text)
 }
 
-pub(crate) struct Tlstext {
+pub(crate) struct TlsText {
     j0: OneTimePadShared,
     ciphertext: DecodeFutureTyped<BitVec<u32>, Vec<u8>>,
     aad: Vec<u8>,
 }
 
-impl Tlstext {
+impl TlsText {
+    #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn compute<Ctx, U>(
         self,
         universal_hash: &mut U,

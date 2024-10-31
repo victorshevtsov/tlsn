@@ -1,3 +1,5 @@
+//! Decryption of ciphertext.
+
 use crate::{
     decode::{Decode, OneTimePadShared},
     record_layer::aead::tag::{build_ghash_data, verify_tag, Tag},
@@ -8,11 +10,13 @@ use cipher::{CipherCircuit, Keystream};
 use mpz_circuits::types::ToBinaryRepr;
 use mpz_common::Context;
 use mpz_memory_core::{
-    binary::{Binary, U8}, MemoryExt, Repr, StaticSize, Vector, View, ViewExt,
+    binary::{Binary, U8},
+    MemoryExt, Repr, StaticSize, Vector, View, ViewExt,
 };
 use mpz_vm_core::Vm;
 use tlsn_universal_hash::UniversalHash;
 
+#[instrument(level = "trace", skip_all, err)]
 pub(crate) fn decrypt<V, C>(
     vm: &mut V,
     role: TlsRole,
@@ -21,7 +25,7 @@ pub(crate) fn decrypt<V, C>(
     start_counter: u32,
     mut ciphertext: Vec<u8>,
     aad: Vec<u8>,
-) -> Result<Plaintext, MpcTlsError>
+) -> Result<PlainText, MpcTlsError>
 where
     V: Vm<Binary> + View<Binary>,
     C: CipherCircuit,
@@ -55,7 +59,7 @@ where
         .assign(vm, explicit_nonce, start_counter, ciphertext.clone())
         .map_err(MpcTlsError::decrypt)?;
 
-    let plaintext = Plaintext {
+    let plaintext = PlainText {
         role,
         j0,
         ciphertext,
@@ -67,7 +71,7 @@ where
     Ok(plaintext)
 }
 
-pub(crate) struct Plaintext {
+pub(crate) struct PlainText {
     role: TlsRole,
     j0: OneTimePadShared,
     ciphertext: Vec<u8>,
@@ -76,7 +80,8 @@ pub(crate) struct Plaintext {
     aad: Vec<u8>,
 }
 
-impl Plaintext {
+impl PlainText {
+    #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn compute<Ctx, U>(
         self,
         universal_hash: &mut U,
@@ -86,7 +91,7 @@ impl Plaintext {
         Ctx: Context,
         U: UniversalHash<Ctx>,
     {
-        let Plaintext {
+        let PlainText {
             role,
             j0,
             ciphertext,

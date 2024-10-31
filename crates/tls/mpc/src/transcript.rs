@@ -11,12 +11,10 @@ pub(crate) struct Transcript {
 }
 
 impl Transcript {
-    /// Appends traffic sent from the leader.
     pub(crate) fn record_sent(&mut self, typ: ContentType, traffic: Vector<U8>) {
         self.sent.record(typ, traffic);
     }
 
-    /// Appends traffic received by the leader.
     pub(crate) fn record_recv(&mut self, typ: ContentType, traffic: Vector<U8>) {
         self.recv.record(typ, traffic);
     }

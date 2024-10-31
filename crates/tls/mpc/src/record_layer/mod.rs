@@ -1,4 +1,9 @@
-use crate::{error::Kind, MpcTlsError};
+//! TLS record layer.
+
+use crate::{error::Kind, transcript::Transcript, MpcTlsError};
+use cipher::Keystream;
+use mpz_circuits::types::ToBinaryRepr;
+use mpz_vm_core::Vm;
 use tls_core::{
     cipher::make_tls12_aad,
     msgs::{
@@ -9,178 +14,106 @@ use tls_core::{
 };
 
 mod aead;
+use aead::encrypt::{encrypt, TlsText};
 
-pub(crate) struct Encrypter {
-    aead: Box<dyn aead::Aead<Error = AesGcmError>>,
-    seq: u64,
-    sent_bytes: usize,
-    transcript_id: String,
-    opaque_transcript_id: String,
+pub(crate) async fn encrypt_private<V>(
+    vm: &mut V,
+    transcript: &mut Transcript,
+    keystream: &mut Keystream,
+    msg: PlainMessage,
+) -> Result<OpaqueMessage, MpcTlsError> 
+    where
+        V: Vm<Binary>,
+{
+    let PlainMessage {
+        typ,
+        version,
+        payload,
+    } = msg;
+
+    let (seq, _) = transcript.seq();
+    let len = payload.0.len();
+    let explicit_nonce = seq.to_be_bytes().to_vec();
+    let aad = make_tls12_aad(seq, typ, version, len);
+
+    let plaintext = payload.0;
+    let keystream = keystream.chunk_sufficient(plaintext.len())?;
+    keystream.apply(vm, input);
+
+    encrypt
+    let ciphertext = self
+        .aead
+        .encrypt_private(explicit_nonce.clone(), payload.0, aad.to_vec())
+        .await
+        .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "encrypt_private error", e))?;
+
+    transcript.record_sent(typ, ciphertext.clone());
+
+    let mut payload = explicit_nonce;
+    payload.extend(ciphertext);
+
+    Ok(OpaqueMessage {
+        typ,
+        version,
+        payload: Payload::new(payload),
+    })
 }
 
-impl Encrypter {
-    pub(crate) fn new(
-        aead: Box<dyn aead::Aead<Error = AesGcmError>>,
-        transcript_id: String,
-        opaque_transcript_id: String,
-    ) -> Self {
-        Self {
-            aead,
-            seq: 0,
-            sent_bytes: 0,
-            transcript_id,
-            opaque_transcript_id,
-        }
-    }
+pub(crate) async fn encrypt_blind(
+    &mut self,
+    typ: ContentType,
+    version: ProtocolVersion,
+    len: usize,
+) -> Result<(), MpcTlsError> {
+    self.prepare_encrypt(typ);
 
-    /// Returns the number of application data bytes encrypted
-    pub(crate) fn sent_bytes(&self) -> usize {
-        self.sent_bytes
-    }
+    let seq = self.seq;
+    let explicit_nonce = seq.to_be_bytes().to_vec();
+    let aad = make_tls12_aad(seq, typ, version, len);
 
-    pub(crate) async fn set_key(&mut self, key: ValueRef, iv: ValueRef) -> Result<(), MpcTlsError> {
-        self.aead.set_key(key, iv).await.map_err(|e| {
-            MpcTlsError::new_with_source(Kind::Encrypt, "error setting encryption key", e)
-        })?;
+    self.aead
+        .encrypt_blind(explicit_nonce, len, aad.to_vec())
+        .await
+        .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "encrypt_blind error", e))?;
 
-        Ok(())
-    }
+    self.record_message(typ, len);
 
-    pub(crate) async fn preprocess(&mut self, len: usize) -> Result<(), MpcTlsError> {
-        self.aead
-            .preprocess(len)
-            .await
-            .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "preprocess error", e))?;
+    Ok(())
+}
 
-        Ok(())
-    }
+pub(crate) async fn encrypt_public(
+    &mut self,
+    msg: PlainMessage,
+) -> Result<OpaqueMessage, MpcTlsError> {
+    let PlainMessage {
+        typ,
+        version,
+        payload,
+    } = msg;
 
-    pub(crate) async fn setup(&mut self) -> Result<(), MpcTlsError> {
-        self.aead
-            .setup()
-            .await
-            .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "setup error", e))?;
+    self.prepare_encrypt(typ);
 
-        Ok(())
-    }
+    let seq = self.seq;
+    let len = payload.0.len();
+    let explicit_nonce = seq.to_be_bytes().to_vec();
+    let aad = make_tls12_aad(seq, typ, version, len);
 
-    pub(crate) async fn start(&mut self) -> Result<(), MpcTlsError> {
-        self.aead
-            .start()
-            .await
-            .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "start error", e))?;
+    let ciphertext = self
+        .aead
+        .encrypt_public(explicit_nonce.clone(), payload.0, aad.to_vec())
+        .await
+        .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "encrypt_public error", e))?;
 
-        Ok(())
-    }
+    self.record_message(typ, len);
 
-    pub(crate) async fn encrypt_private(
-        &mut self,
-        msg: PlainMessage,
-    ) -> Result<OpaqueMessage, MpcTlsError> {
-        let PlainMessage {
-            typ,
-            version,
-            payload,
-        } = msg;
+    let mut payload = explicit_nonce;
+    payload.extend(ciphertext);
 
-        self.prepare_encrypt(typ);
-
-        let seq = self.seq;
-        let len = payload.0.len();
-        let explicit_nonce = seq.to_be_bytes().to_vec();
-        let aad = make_tls12_aad(seq, typ, version, len);
-
-        let ciphertext = self
-            .aead
-            .encrypt_private(explicit_nonce.clone(), payload.0, aad.to_vec())
-            .await
-            .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "encrypt_private error", e))?;
-
-        self.record_message(typ, len);
-
-        let mut payload = explicit_nonce;
-        payload.extend(ciphertext);
-
-        Ok(OpaqueMessage {
-            typ,
-            version,
-            payload: Payload::new(payload),
-        })
-    }
-
-    pub(crate) async fn encrypt_blind(
-        &mut self,
-        typ: ContentType,
-        version: ProtocolVersion,
-        len: usize,
-    ) -> Result<(), MpcTlsError> {
-        self.prepare_encrypt(typ);
-
-        let seq = self.seq;
-        let explicit_nonce = seq.to_be_bytes().to_vec();
-        let aad = make_tls12_aad(seq, typ, version, len);
-
-        self.aead
-            .encrypt_blind(explicit_nonce, len, aad.to_vec())
-            .await
-            .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "encrypt_blind error", e))?;
-
-        self.record_message(typ, len);
-
-        Ok(())
-    }
-
-    pub(crate) async fn encrypt_public(
-        &mut self,
-        msg: PlainMessage,
-    ) -> Result<OpaqueMessage, MpcTlsError> {
-        let PlainMessage {
-            typ,
-            version,
-            payload,
-        } = msg;
-
-        self.prepare_encrypt(typ);
-
-        let seq = self.seq;
-        let len = payload.0.len();
-        let explicit_nonce = seq.to_be_bytes().to_vec();
-        let aad = make_tls12_aad(seq, typ, version, len);
-
-        let ciphertext = self
-            .aead
-            .encrypt_public(explicit_nonce.clone(), payload.0, aad.to_vec())
-            .await
-            .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "encrypt_public error", e))?;
-
-        self.record_message(typ, len);
-
-        let mut payload = explicit_nonce;
-        payload.extend(ciphertext);
-
-        Ok(OpaqueMessage {
-            typ,
-            version,
-            payload: Payload::new(payload),
-        })
-    }
-
-    fn prepare_encrypt(&mut self, typ: ContentType) {
-        // Set the transcript id depending on the type of message
-        match typ {
-            ContentType::ApplicationData => {
-                self.aead.set_transcript_id(&self.transcript_id);
-            }
-            _ => self.aead.set_transcript_id(&self.opaque_transcript_id),
-        }
-    }
-
-    fn record_message(&mut self, typ: ContentType, len: usize) {
-        self.seq += 1;
-        if let ContentType::ApplicationData = typ {
-            self.sent_bytes += len;
-        }
-    }
+    Ok(OpaqueMessage {
+        typ,
+        version,
+        payload: Payload::new(payload),
+    })
 }
 
 pub(crate) struct Decrypter {

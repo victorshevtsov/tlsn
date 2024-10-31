@@ -1,9 +1,7 @@
 use crate::{
     error::MpcTlsError,
-    msg::{
-        ClientFinishedVd, CommitMessage, ComputeKeyExchange,
-        MpcTlsMessage, ServerFinishedVd,
-    },
+    msg::{ClientFinishedVd, CommitMessage, ComputeKeyExchange, MpcTlsMessage, ServerFinishedVd},
+    transcript::Transcript,
     Direction, MpcTlsChannel, MpcTlsLeaderConfig,
 };
 use async_trait::async_trait;
@@ -62,6 +60,7 @@ pub struct MpcTlsLeader<K, P, C, U, Ctx, V> {
     buffer: VecDeque<OpaqueMessage>,
     /// Whether we have already committed to the transcript.
     committed: bool,
+    transcript: Transcript,
     prf_out: Option<PrfOutput>,
 }
 
@@ -103,6 +102,7 @@ where
             buffer: VecDeque::new(),
             committed: false,
             prf_out: None,
+            transcript: Transcript::default(),
         }
     }
 
