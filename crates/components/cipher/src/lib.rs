@@ -164,7 +164,8 @@ impl<C: CipherCircuit> Keystream<C> {
     ///
     /// * `byte_count` - The minimum number of bytes required.
     pub fn chunk_sufficient(&mut self, byte_count: usize) -> Result<Keystream<C>, CipherError> {
-        let block_count = byte_count / 16 + (byte_count % 16 != 0) as usize;
+        let block_size = <<C as CipherCircuit>::Block as StaticSize<Binary>>::SIZE / 8;
+        let block_count = byte_count / block_size + (byte_count % block_size != 0) as usize;
         self.chunk(block_count)
     }
 
