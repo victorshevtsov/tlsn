@@ -26,8 +26,6 @@ pub type OTReceiver = mpz_ot::kos::SharedReceiver<BaseOTSender>;
 pub type Executor = mpz_common::executor::MTExecutor<MuxControl>;
 /// MPC thread context.
 pub type Context = mpz_common::executor::MTContext<MuxControl, Io>;
-/// DEAP thread.
-pub type DEAPThread = mpz_garble::protocol::deap::DEAPThread<Context, OTSender, OTReceiver>;
 
 /// The party's role in the TLSN protocol.
 ///
