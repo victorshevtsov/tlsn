@@ -15,6 +15,7 @@ use mpz_memory_core::{
 };
 use mpz_vm_core::Vm;
 use tlsn_universal_hash::UniversalHash;
+use tracing::instrument;
 
 #[instrument(level = "trace", skip_all, err)]
 pub(crate) fn decrypt<V, C>(

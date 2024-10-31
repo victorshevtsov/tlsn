@@ -1,4 +1,4 @@
-use mpz_memory_core::Vector;
+use mpz_memory_core::{binary::U8, Vector};
 use tls_core::msgs::enums::ContentType;
 
 /// A transcript for TLS traffic

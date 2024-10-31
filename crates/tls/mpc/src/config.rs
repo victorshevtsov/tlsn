@@ -1,5 +1,7 @@
 use derive_builder::Builder;
 
+const DEFAULT_TRANSCRIPT_MAX_SIZE: usize = 1 << 14;
+
 /// Transcript configuration.
 #[derive(Debug, Clone, Builder)]
 pub struct TranscriptConfig {

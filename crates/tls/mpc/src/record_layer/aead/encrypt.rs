@@ -17,15 +17,16 @@ use mpz_memory_core::{
 };
 use mpz_vm_core::Vm;
 use tlsn_universal_hash::UniversalHash;
+use tracing::instrument;
 
 #[instrument(level = "trace", skip_all, err)]
-pub(crate) fn encrypt<V, C>(
+pub(crate) fn prepare_tag_for_encrypt<V, C>(
     vm: &mut V,
     role: TlsRole,
     j0: <C as CipherCircuit>::Block,
     ciphertext: Vector<U8>,
     aad: Vec<u8>,
-) -> Result<TlsText, MpcTlsError>
+) -> Result<TagCreator, MpcTlsError>
 where
     V: Vm<Binary> + Memory<Binary> + View<Binary>,
     C: CipherCircuit,
@@ -36,7 +37,7 @@ where
 
     let ciphertext = vm.decode(ciphertext).map_err(MpcTlsError::vm)?;
 
-    let text = TlsText {
+    let text = TagCreator {
         j0,
         ciphertext,
         aad,
@@ -45,19 +46,19 @@ where
     Ok(text)
 }
 
-pub(crate) struct TlsText {
+pub(crate) struct TagCreator {
     j0: OneTimePadShared,
     ciphertext: DecodeFutureTyped<BitVec<u32>, Vec<u8>>,
     aad: Vec<u8>,
 }
 
-impl TlsText {
+impl TagCreator {
     #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn compute<Ctx, U>(
         self,
         universal_hash: &mut U,
         ctx: &mut Ctx,
-    ) -> Result<Vec<u8>, MpcTlsError>
+    ) -> Result<(Vec<u8>, Vec<u8>), MpcTlsError>
     where
         Ctx: Context,
         U: UniversalHash<Ctx>,
@@ -67,8 +68,8 @@ impl TlsText {
 
         let ciphertext = self.ciphertext.await?;
 
-        let mut ciphertext = build_ghash_data(aad, ciphertext);
-        let hash = universal_hash.finalize(ciphertext.clone(), ctx).await?;
+        let mut ciphertext_padded = build_ghash_data(aad, ciphertext);
+        let hash = universal_hash.finalize(ciphertext_padded, ctx).await?;
 
         let tag_share = j0
             .into_iter()
@@ -78,8 +79,8 @@ impl TlsText {
         let tag_share = Tag::new(tag_share);
 
         let tag = add_tag_shares(ctx, tag_share).await?;
+        let ciphertext = ciphertext.extend(&tag.into_inner());
 
-        ciphertext.extend_from_slice(&tag.into_inner());
         Ok(ciphertext)
     }
 }
