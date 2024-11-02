@@ -1,9 +1,10 @@
 //! TLS record layer.
 
-use crate::{error::Kind, transcript::Transcript, MpcTlsError};
-use cipher::Keystream;
+use crate::{transcript::Transcript, MpcTlsError, TlsRole};
+use cipher::{CipherCircuit, Keystream};
 use mpz_circuits::types::ToBinaryRepr;
-use mpz_vm_core::Vm;
+use mpz_memory_core::{binary::Binary, Memory, MemoryExt, View, ViewExt};
+use mpz_vm_core::{Vm, VmExt};
 use tls_core::{
     cipher::make_tls12_aad,
     msgs::{
@@ -14,16 +15,20 @@ use tls_core::{
 };
 
 mod aead;
-use aead::encrypt::{encrypt, TlsText};
+use aead::encrypt::{prepare_tag_for_encrypt, TagCreator};
 
-pub(crate) async fn encrypt_private<V>(
+const START_COUNTER: u32 = 2;
+
+pub(crate) async fn encrypt_private<V, C>(
     vm: &mut V,
+    role: TlsRole,
     transcript: &mut Transcript,
-    keystream: &mut Keystream,
+    keystream: &mut Keystream<C>,
     msg: PlainMessage,
-) -> Result<OpaqueMessage, MpcTlsError> 
-    where
-        V: Vm<Binary>,
+) -> Result<OpaqueMessage, MpcTlsError>
+where
+    V: Vm<Binary> + View<Binary>,
+    C: CipherCircuit,
 {
     let PlainMessage {
         typ,
@@ -35,19 +40,21 @@ pub(crate) async fn encrypt_private<V>(
     let len = payload.0.len();
     let explicit_nonce = seq.to_be_bytes().to_vec();
     let aad = make_tls12_aad(seq, typ, version, len);
-
     let plaintext = payload.0;
+
+    let plaintext_ref = vm.alloc().map_err(MpcTlsError::vm)?;
+    vm.mark_private(plaintext_ref);
+
     let keystream = keystream.chunk_sufficient(plaintext.len())?;
-    keystream.apply(vm, input);
+    let cipher_out = keystream.apply(vm, plaintext_ref)?;
+    let ciphertext = cipher_out.assign(vm, explicit_nonce.clone(), START_COUNTER, plaintext)?;
 
-    encrypt
-    let ciphertext = self
-        .aead
-        .encrypt_private(explicit_nonce.clone(), payload.0, aad.to_vec())
-        .await
-        .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "encrypt_private error", e))?;
+    transcript.record_sent(typ, ciphertext);
 
-    transcript.record_sent(typ, ciphertext.clone());
+    let j0 = keystream.j0(vm, explicit_nonce.clone())?;
+    let tag prepare_tag_for_encrypt(vm, role, j0, ciphertext, aad)
+    // TODO: Encrypt here
+
 
     let mut payload = explicit_nonce;
     payload.extend(ciphertext);
@@ -65,20 +72,7 @@ pub(crate) async fn encrypt_blind(
     version: ProtocolVersion,
     len: usize,
 ) -> Result<(), MpcTlsError> {
-    self.prepare_encrypt(typ);
-
-    let seq = self.seq;
-    let explicit_nonce = seq.to_be_bytes().to_vec();
-    let aad = make_tls12_aad(seq, typ, version, len);
-
-    self.aead
-        .encrypt_blind(explicit_nonce, len, aad.to_vec())
-        .await
-        .map_err(|e| MpcTlsError::new_with_source(Kind::Encrypt, "encrypt_blind error", e))?;
-
-    self.record_message(typ, len);
-
-    Ok(())
+    todo!()
 }
 
 pub(crate) async fn encrypt_public(
