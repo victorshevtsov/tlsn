@@ -9,16 +9,6 @@ pub struct UniversalHashError {
 }
 
 impl UniversalHashError {
-    pub(crate) fn new<E>(kind: ErrorKind, source: E) -> Self
-    where
-        E: Into<Box<dyn std::error::Error + Send + Sync>>,
-    {
-        Self {
-            kind,
-            source: Some(source.into()),
-        }
-    }
-
     pub(crate) fn state<E>(source: E) -> Self
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -58,6 +48,16 @@ impl UniversalHashError {
             source: Some(source.into()),
         }
     }
+
+    pub(crate) fn flush<E>(source: E) -> Self
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        Self {
+            kind: ErrorKind::Flush,
+            source: Some(source.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -66,6 +66,7 @@ pub(crate) enum ErrorKind {
     KeyLength,
     InputLength,
     ShareConversion,
+    Flush,
 }
 
 impl Display for UniversalHashError {
@@ -75,6 +76,7 @@ impl Display for UniversalHashError {
             ErrorKind::KeyLength => write!(f, "key length error")?,
             ErrorKind::InputLength => write!(f, "input length error")?,
             ErrorKind::ShareConversion => write!(f, "share conversion error")?,
+            ErrorKind::Flush => write!(f, "flush error")?,
         }
 
         if let Some(source) = &self.source {

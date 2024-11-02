@@ -45,7 +45,6 @@ opaque_debug::implement!(Intermediate);
 /// because both now have additive shares of all the powers of `H`.
 #[derive(Clone)]
 pub(crate) struct Finalized {
-    pub(super) odd_mul_shares: Vec<Gf2_128>,
     pub(super) add_shares: Vec<Gf2_128>,
 }
 

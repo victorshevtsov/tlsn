@@ -9,19 +9,19 @@ use async_trait::async_trait;
 use mpz_common::{Context, Flush};
 use mpz_core::Block;
 use mpz_fields::gf2_128::Gf2_128;
-use mpz_share_conversion::{ReceiverError, SenderError, ShareConvert};
+use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
 use std::fmt::Debug;
 use tracing::instrument;
 
 mod config;
-#[cfg(feature = "ideal")]
-pub(crate) mod ideal;
 
 pub use config::{GhashConfig, GhashConfigBuilder, GhashConfigBuilderError};
 
 #[derive(Debug)]
 enum State {
     Init,
+    SetKey { key: Gf2_128 },
+    MultKey { key: Gf2_128 },
     Ready { core: GhashCore<Finalized> },
     Error,
 }
@@ -35,7 +35,11 @@ pub struct Ghash<C> {
     converter: C,
 }
 
-impl<C> Ghash<C> {
+impl<C: ShareConvert<Gf2_128>> Ghash<C>
+where
+    C: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    C: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     /// Creates a new instance.
     ///
     /// # Arguments
@@ -43,7 +47,6 @@ impl<C> Ghash<C> {
     /// * `config`      - The configuration for this Ghash instance.
     /// * `converter`   - An instance which allows to convert multiplicative into additive shares
     ///                   and vice versa.
-    /// * `context`     - The context.
     pub fn new(config: GhashConfig, converter: C) -> Self {
         Self {
             state: State::Init,
@@ -52,43 +55,29 @@ impl<C> Ghash<C> {
         }
     }
 
-    /// Computes all the additive shares of the hashkey powers.
+    /// Allocates resources needed for ghash.
+    pub fn alloc(&mut self) -> Result<(), UniversalHashError> {
+        // We need only half the number of `block_count` M2As because of the free
+        // squaring trick and we need one extra A2M conversion in the beginning.
+        // Both M2A and A2M, each require a single OLE.
+        AdditiveToMultiplicative::<Gf2_128>::alloc(&mut self.converter, 1)
+            .map_err(UniversalHashError::conversion)?;
+
+        MultiplicativeToAdditive::<Gf2_128>::alloc(
+            &mut self.converter,
+            self.config.block_count / 2,
+        )
+        .map_err(UniversalHashError::conversion)?;
+
+        Ok(())
+    }
+
+    /// Sets the key for the hash function
     ///
-    /// We need this when the max block count changes.
-    #[instrument(level = "debug", skip_all, err)]
-    async fn compute_add_shares<Ctx>(
-        &mut self,
-        core: GhashCore<Intermediate>,
-        ctx: &mut Ctx,
-    ) -> Result<GhashCore<Finalized>, UniversalHashError>
-    where
-        Ctx: Context,
-        C: ShareConvert<Gf2_128>,
-    {
-        let odd_mul_shares = core.odd_mul_shares();
-
-        let add_shares = self.converter.to_additive(ctx, odd_mul_shares).await?;
-        let core = core.add_new_add_shares(&add_shares);
-
-        Ok(core)
-    }
-}
-
-impl<C> Debug for Ghash<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Ghash")
-            .field("state", &self.state)
-            .field("config", &self.config)
-            .field("converter", &"{{ .. }}".to_string())
-            .finish()
-    }
-}
-
-impl<C> UniversalHash for Ghash<C>
-where
-    C: ShareConvert<Gf2_128> + Send,
-{
-    fn set_key(&mut self, key: Vec<u8>) -> Result<(), UniversalHashError> {
+    /// # Arguments
+    ///
+    /// * `key` - Key to use for the hash function.
+    pub fn set_key(&mut self, key: Vec<u8>) -> Result<(), UniversalHashError> {
         if key.len() != 16 {
             return Err(UniversalHashError::key(format!(
                 "key length should be 16 bytes but is {}",
@@ -106,22 +95,18 @@ where
         // GHASH reflects the bits of the key.
         let h_additive = Gf2_128::new(u128::from_be_bytes(h_additive).reverse_bits());
 
-        let h_multiplicative = self
-            .converter
-            .to_multiplicative(ctx, vec![h_additive])
-            .await?;
-
-        let core = GhashCore::new(self.config.block_count);
-        let core = core.compute_odd_mul_powers(h_multiplicative[0]);
-        let core = self.compute_add_shares(core, ctx).await?;
-
-        self.state = State::Ready { core };
+        self.state = State::SetKey { key: h_additive };
 
         Ok(())
     }
 
-    #[instrument(level = "debug", skip_all, err)]
-    fn finalize(&mut self, mut input: Vec<u8>) -> Result<Vec<u8>, UniversalHashError> {
+    /// Computes hash of the input, padding the input to the block size
+    /// if needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input to hash.
+    pub fn finalize(&mut self, mut input: Vec<u8>) -> Result<Vec<u8>, UniversalHashError> {
         // Divide by block length and round up.
         let block_count = input.len() / 16 + (input.len() % 16 != 0) as usize;
 
@@ -161,52 +146,173 @@ where
 
         Ok(tag.to_bytes().to_vec())
     }
+
+    /// Converts the additive key share into a multiplicative share.
+    fn compute_multiplicative_share(
+        &mut self,
+    ) -> Result<<C as AdditiveToMultiplicative<Gf2_128>>::Future, UniversalHashError> {
+        let State::SetKey { key } = self.state else {
+            return Err(UniversalHashError::state(
+                "UniversalHash should be in SetKey state",
+            ));
+        };
+
+        let mult_key = self
+            .converter
+            .queue_to_multiplicative(&[key])
+            .map_err(UniversalHashError::flush)?;
+
+        Ok(mult_key)
+    }
+
+    /// Computes all the odd powers of the multiplicative key share and then converts them
+    /// into additive shares.
+    fn compute_additive_shares(
+        &mut self,
+    ) -> Result<
+        (
+            <C as MultiplicativeToAdditive<Gf2_128>>::Future,
+            GhashCore<Intermediate>,
+        ),
+        UniversalHashError,
+    > {
+        let State::MultKey { key } = self.state else {
+            return Err(UniversalHashError::state(
+                "UniversalHash should be in MultKey state",
+            ));
+        };
+
+        let core = GhashCore::new(self.config.block_count).compute_odd_mul_powers(key);
+        let key_powers = core.odd_mul_shares();
+
+        let add_keys = self
+            .converter
+            .queue_to_additive(&key_powers)
+            .map_err(UniversalHashError::flush)?;
+
+        Ok((add_keys, core))
+    }
+}
+
+impl<C> Debug for Ghash<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Ghash")
+            .field("state", &self.state)
+            .field("config", &self.config)
+            .field("converter", &"{{ .. }}".to_string())
+            .finish()
+    }
 }
 
 #[async_trait]
 impl<C, Ctx> Flush<Ctx> for Ghash<C>
 where
-    C: ShareConvert<Gf2_128> + Send,
+    C: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    C: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    C: MultiplicativeToAdditive<Gf2_128, Future: Send>,
     Ctx: Context,
 {
     type Error = UniversalHashError;
 
     fn wants_flush(&self) -> bool {
-        todo!()
+        if let State::SetKey { .. } = self.state {
+            return true;
+        }
+        false
     }
 
     async fn flush(&mut self, ctx: &mut Ctx) -> Result<(), Self::Error> {
-        todo!()
+        if self.converter.wants_flush() {
+            self.converter
+                .flush(ctx)
+                .await
+                .map_err(UniversalHashError::conversion)?;
+        }
+
+        if self.wants_flush() {
+            let mult_key = self.compute_multiplicative_share()?;
+
+            self.converter
+                .flush(ctx)
+                .await
+                .map_err(UniversalHashError::conversion)?;
+
+            let mult_key = *mult_key
+                .await
+                .map_err(UniversalHashError::flush)?
+                .shares
+                .first()
+                .expect("Multiplicative key should be present");
+
+            self.state = State::MultKey { key: mult_key };
+            let (add_keys, core) = self.compute_additive_shares()?;
+
+            self.converter
+                .flush(ctx)
+                .await
+                .map_err(UniversalHashError::conversion)?;
+
+            let add_keys = add_keys.await.map_err(UniversalHashError::flush)?;
+            let core = core.add_new_add_shares(&add_keys.shares);
+
+            self.state = State::Ready { core };
+        }
+
+        Ok(())
+    }
+}
+
+impl<C> UniversalHash for Ghash<C>
+where
+    C: ShareConvert<Gf2_128> + Send,
+{
+    fn set_key(&mut self, _key: Vec<u8>) -> Result<(), UniversalHashError> {
+        unimplemented!()
+    }
+
+    #[instrument(level = "debug", skip_all, err)]
+    fn finalize(&mut self, _input: Vec<u8>) -> Result<Vec<u8>, UniversalHashError> {
+        unimplemented!()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        ghash::{Ghash, GhashConfig},
-        UniversalHash,
-    };
+    use crate::ghash::{Ghash, GhashConfig};
     use ghash_rc::{
         universal_hash::{KeyInit, UniversalHash as UniversalHashReference},
         GHash as GhashReference,
     };
-    use mpz_common::executor::test_st_executor;
-    use mpz_share_conversion::ideal::{ideal_share_converter, IdealShareConverter};
+    use mpz_common::{executor::test_st_executor, Flush};
+    use mpz_core::Block;
+    use mpz_fields::gf2_128::Gf2_128;
+    use mpz_share_conversion::ideal::{
+        ideal_share_convert, IdealShareConvertReceiver, IdealShareConvertSender,
+    };
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha12Rng;
 
-    fn create_pair(block_count: usize) -> (Ghash<IdealShareConverter>, Ghash<IdealShareConverter>) {
-        let (convert_a, convert_b) = ideal_share_converter();
+    fn create_pair(
+        block_count: usize,
+    ) -> (
+        Ghash<IdealShareConvertSender<Gf2_128>>,
+        Ghash<IdealShareConvertReceiver<Gf2_128>>,
+    ) {
+        let (convert_a, convert_b) = ideal_share_convert(Block::ZERO);
 
         let config = GhashConfig::builder()
             .block_count(block_count)
             .build()
             .unwrap();
 
-        (
+        let (mut sender, mut receiver) = (
             Ghash::new(config.clone(), convert_a),
             Ghash::new(config, convert_b),
-        )
+        );
+        sender.alloc().unwrap();
+        receiver.alloc().unwrap();
+
+        (sender, receiver)
     }
 
     #[tokio::test]
@@ -216,21 +322,19 @@ mod tests {
         let h: u128 = rng.gen();
         let sender_key: u128 = rng.gen();
         let receiver_key: u128 = h ^ sender_key;
-        let message: Vec<u8> = (0..128).map(|_| rng.gen()).collect();
+
+        let message: Vec<u8> = (0..16).map(|_| rng.gen()).collect();
 
         let (mut sender, mut receiver) = create_pair(1);
+        sender.set_key(sender_key.to_be_bytes().to_vec()).unwrap();
+        receiver
+            .set_key(receiver_key.to_be_bytes().to_vec())
+            .unwrap();
 
-        tokio::try_join!(
-            sender.set_key(sender_key.to_be_bytes().to_vec(), &mut ctx_a),
-            receiver.set_key(receiver_key.to_be_bytes().to_vec(), &mut ctx_b)
-        )
-        .unwrap();
+        tokio::try_join!(sender.flush(&mut ctx_a), receiver.flush(&mut ctx_b)).unwrap();
 
-        let (sender_share, receiver_share) = tokio::try_join!(
-            sender.finalize(message.clone(), &mut ctx_a),
-            receiver.finalize(message.clone(), &mut ctx_b)
-        )
-        .unwrap();
+        let sender_share = sender.finalize(message.clone()).unwrap();
+        let receiver_share = receiver.finalize(message.clone()).unwrap();
 
         let tag = sender_share
             .iter()
@@ -250,21 +354,19 @@ mod tests {
         let receiver_key: u128 = h ^ sender_key;
 
         // Message length is not a multiple of the block length
-        let message: Vec<u8> = (0..126).map(|_| rng.gen()).collect();
+        let message: Vec<u8> = (0..14).map(|_| rng.gen()).collect();
 
         let (mut sender, mut receiver) = create_pair(1);
 
-        tokio::try_join!(
-            sender.set_key(sender_key.to_be_bytes().to_vec(), &mut ctx_a),
-            receiver.set_key(receiver_key.to_be_bytes().to_vec(), &mut ctx_b)
-        )
-        .unwrap();
+        sender.set_key(sender_key.to_be_bytes().to_vec()).unwrap();
+        receiver
+            .set_key(receiver_key.to_be_bytes().to_vec())
+            .unwrap();
 
-        let (sender_share, receiver_share) = tokio::try_join!(
-            sender.finalize(message.clone(), &mut ctx_a),
-            receiver.finalize(message.clone(), &mut ctx_b)
-        )
-        .unwrap();
+        tokio::try_join!(sender.flush(&mut ctx_a), receiver.flush(&mut ctx_b)).unwrap();
+
+        let sender_share = sender.finalize(message.clone()).unwrap();
+        let receiver_share = receiver.finalize(message.clone()).unwrap();
 
         let tag = sender_share
             .iter()
@@ -282,33 +384,21 @@ mod tests {
         let h: u128 = rng.gen();
         let sender_key: u128 = rng.gen();
         let receiver_key: u128 = h ^ sender_key;
-        let short_message: Vec<u8> = (0..128).map(|_| rng.gen()).collect();
 
         // A longer message.
-        let long_message: Vec<u8> = (0..192).map(|_| rng.gen()).collect();
+        let long_message: Vec<u8> = (0..30).map(|_| rng.gen()).collect();
 
-        // Create and setup sender and receiver for short message length.
-        let (mut sender, mut receiver) = create_pair(1);
+        let (mut sender, mut receiver) = create_pair(2);
 
-        tokio::try_join!(
-            sender.set_key(sender_key.to_be_bytes().to_vec(), &mut ctx_a),
-            receiver.set_key(receiver_key.to_be_bytes().to_vec(), &mut ctx_b)
-        )
-        .unwrap();
+        sender.set_key(sender_key.to_be_bytes().to_vec()).unwrap();
+        receiver
+            .set_key(receiver_key.to_be_bytes().to_vec())
+            .unwrap();
 
-        // Compute the shares for the short message.
-        tokio::try_join!(
-            sender.finalize(short_message.clone(), &mut ctx_a),
-            receiver.finalize(short_message.clone(), &mut ctx_b)
-        )
-        .unwrap();
+        tokio::try_join!(sender.flush(&mut ctx_a), receiver.flush(&mut ctx_b)).unwrap();
 
-        // Now compute the shares for the longer message.
-        let (sender_share, receiver_share) = tokio::try_join!(
-            sender.finalize(long_message.clone(), &mut ctx_a),
-            receiver.finalize(long_message.clone(), &mut ctx_b)
-        )
-        .unwrap();
+        let sender_share = sender.finalize(long_message.clone()).unwrap();
+        let receiver_share = receiver.finalize(long_message.clone()).unwrap();
 
         let tag = sender_share
             .iter()
@@ -317,13 +407,32 @@ mod tests {
             .collect::<Vec<u8>>();
 
         assert_eq!(tag, ghash_reference_impl(h, &long_message));
+    }
 
-        // We should still be able to generate a Ghash output for the shorter message.
-        let (sender_share, receiver_share) = tokio::try_join!(
-            sender.finalize(short_message.clone(), &mut ctx_a),
-            receiver.finalize(short_message.clone(), &mut ctx_b)
-        )
-        .unwrap();
+    #[tokio::test]
+    async fn test_ghash_repeated() {
+        let (mut ctx_a, mut ctx_b) = test_st_executor(8);
+        let mut rng = ChaCha12Rng::from_seed([0; 32]);
+        let h: u128 = rng.gen();
+        let sender_key: u128 = rng.gen();
+        let receiver_key: u128 = h ^ sender_key;
+
+        // Two messages.
+        let first_message: Vec<u8> = (0..14).map(|_| rng.gen()).collect();
+        let second_message: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+
+        let (mut sender, mut receiver) = create_pair(2);
+
+        sender.set_key(sender_key.to_be_bytes().to_vec()).unwrap();
+        receiver
+            .set_key(receiver_key.to_be_bytes().to_vec())
+            .unwrap();
+
+        tokio::try_join!(sender.flush(&mut ctx_a), receiver.flush(&mut ctx_b)).unwrap();
+
+        // Compute and check first message.
+        let sender_share = sender.finalize(first_message.clone()).unwrap();
+        let receiver_share = receiver.finalize(first_message.clone()).unwrap();
 
         let tag = sender_share
             .iter()
@@ -331,7 +440,19 @@ mod tests {
             .map(|(a, b)| a ^ b)
             .collect::<Vec<u8>>();
 
-        assert_eq!(tag, ghash_reference_impl(h, &short_message));
+        assert_eq!(tag, ghash_reference_impl(h, &first_message));
+
+        // Compute and check second message.
+        let sender_share = sender.finalize(second_message.clone()).unwrap();
+        let receiver_share = receiver.finalize(second_message.clone()).unwrap();
+
+        let tag = sender_share
+            .iter()
+            .zip(receiver_share.iter())
+            .map(|(a, b)| a ^ b)
+            .collect::<Vec<u8>>();
+
+        assert_eq!(tag, ghash_reference_impl(h, &second_message));
     }
 
     fn ghash_reference_impl(h: u128, message: &[u8]) -> Vec<u8> {

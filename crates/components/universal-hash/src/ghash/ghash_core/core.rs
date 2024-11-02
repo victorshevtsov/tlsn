@@ -83,7 +83,6 @@ impl GhashCore<Intermediate> {
         GhashCore {
             state: Finalized {
                 add_shares: self.state.cached_add_shares,
-                odd_mul_shares: self.state.odd_mul_shares,
             },
             max_block_count: self.max_block_count,
         }
@@ -91,11 +90,6 @@ impl GhashCore<Intermediate> {
 }
 
 impl GhashCore<Finalized> {
-    /// Returns the currently configured maximum message length.
-    pub(crate) fn get_max_blocks(&self) -> usize {
-        self.max_block_count
-    }
-
     /// Generates the GHASH output.
     ///
     /// Computes the 2PC additive share of the GHASH output.

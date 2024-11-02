@@ -200,16 +200,26 @@ mod tests {
 
         // The Ghash key.
         let h: Gf2_128 = rng.gen();
-        let message = Block::random_vec(&mut rng, 10);
 
-        let (sender, receiver) = setup_ghash_to_intermediate_state(h, message.len());
+        // Two messages
+        let message = Block::random_vec(&mut rng, 10);
+        let message_long = Block::random_vec(&mut rng, 20);
+
+        let (sender, receiver) = setup_ghash_to_intermediate_state(h, message_long.len());
         let (sender, receiver) = ghash_to_finalized(sender, receiver);
 
-        let message_long = Block::random_vec(&mut rng, 20);
+        let output = sender.finalize(&message).unwrap() ^ receiver.finalize(&message).unwrap();
+
+        // First message
+        assert_eq!(
+            output,
+            ghash_reference_impl(h.to_inner().reverse_bits(), &message)
+        );
 
         let output =
             sender.finalize(&message_long).unwrap() ^ receiver.finalize(&message_long).unwrap();
 
+        // Second message
         assert_eq!(
             output,
             ghash_reference_impl(h.to_inner().reverse_bits(), &message_long)
