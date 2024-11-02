@@ -9,6 +9,9 @@ mod error;
 pub mod ghash;
 pub use error::UniversalHashError;
 
+use async_trait::async_trait;
+
+#[async_trait]
 /// A trait supporting different kinds of hash functions.
 pub trait UniversalHash {
     /// Sets the key for the hash function

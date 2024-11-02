@@ -6,10 +6,10 @@ use crate::{
     UniversalHash, UniversalHashError,
 };
 use async_trait::async_trait;
-use mpz_common::{Context, Preprocess};
+use mpz_common::{Context, Flush};
 use mpz_core::Block;
 use mpz_fields::gf2_128::Gf2_128;
-use mpz_share_conversion::{ShareConversionError, ShareConvert};
+use mpz_share_conversion::{ReceiverError, SenderError, ShareConvert};
 use std::fmt::Debug;
 use tracing::instrument;
 
@@ -28,7 +28,7 @@ enum State {
 
 /// This is the common instance used by both sender and receiver.
 ///
-/// It is an aio wrapper which mostly uses [GhashCore] for computation.
+/// It is an aio wrapper which mostly uses [`GhashCore`] for computation.
 pub struct Ghash<C> {
     state: State,
     config: GhashConfig,
@@ -41,8 +41,8 @@ impl<C> Ghash<C> {
     /// # Arguments
     ///
     /// * `config`      - The configuration for this Ghash instance.
-    /// * `converter`   - An instance which allows to convert multiplicative
-    ///   into additive shares and vice versa.
+    /// * `converter`   - An instance which allows to convert multiplicative into additive shares
+    ///                   and vice versa.
     /// * `context`     - The context.
     pub fn new(config: GhashConfig, converter: C) -> Self {
         Self {
@@ -63,7 +63,7 @@ impl<C> Ghash<C> {
     ) -> Result<GhashCore<Finalized>, UniversalHashError>
     where
         Ctx: Context,
-        C: ShareConvert<Ctx, Gf2_128>,
+        C: ShareConvert<Gf2_128>,
     {
         let odd_mul_shares = core.odd_mul_shares();
 
@@ -84,23 +84,21 @@ impl<C> Debug for Ghash<C> {
     }
 }
 
-#[async_trait]
-impl<Ctx, C> UniversalHash<Ctx> for Ghash<C>
+impl<C> UniversalHash for Ghash<C>
 where
-    Ctx: Context,
-    C: Preprocess<Ctx, Error = ShareConversionError> + ShareConvert<Ctx, Gf2_128> + Send,
+    C: ShareConvert<Gf2_128> + Send,
 {
-    #[instrument(level = "info", skip_all, err)]
-    async fn set_key(&mut self, key: Vec<u8>, ctx: &mut Ctx) -> Result<(), UniversalHashError> {
+    fn set_key(&mut self, key: Vec<u8>) -> Result<(), UniversalHashError> {
         if key.len() != 16 {
-            return Err(UniversalHashError::KeyLengthError(16, key.len()));
+            return Err(UniversalHashError::key(format!(
+                "key length should be 16 bytes but is {}",
+                key.len()
+            )));
         }
 
-        if !matches!(&self.state, State::Init) {
-            return Err(UniversalHashError::InvalidState(
-                "Key already set".to_string(),
-            ));
-        }
+        let State::Init = self.state else {
+            return Err(UniversalHashError::state("Key already set".to_string()));
+        };
 
         let mut h_additive = [0u8; 16];
         h_additive.copy_from_slice(key.as_slice());
@@ -113,7 +111,7 @@ where
             .to_multiplicative(ctx, vec![h_additive])
             .await?;
 
-        let core = GhashCore::new(self.config.initial_block_count);
+        let core = GhashCore::new(self.config.block_count);
         let core = core.compute_odd_mul_powers(h_multiplicative[0]);
         let core = self.compute_add_shares(core, ctx).await?;
 
@@ -123,49 +121,22 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    fn setup(&mut self) -> Result<(), UniversalHashError> {
-        // We need only half the number of `max_block_count` M2As because of the free
-        // squaring trick and we need one extra A2M conversion in the beginning.
-        // Both M2A and A2M, each require a single OLE.
-        let ole_count = self.config.max_block_count / 2 + 1;
-        self.converter.alloc(ole_count);
-
-        Ok(())
-    }
-
-    #[instrument(level = "debug", skip_all, err)]
-    async fn preprocess(&mut self, ctx: &mut Ctx) -> Result<(), UniversalHashError> {
-        self.converter.preprocess(ctx).await?;
-
-        Ok(())
-    }
-
-    #[instrument(level = "debug", skip_all, err)]
-    async fn finalize(
-        &mut self,
-        mut input: Vec<u8>,
-        ctx: &mut Ctx,
-    ) -> Result<Vec<u8>, UniversalHashError> {
+    fn finalize(&mut self, mut input: Vec<u8>) -> Result<Vec<u8>, UniversalHashError> {
         // Divide by block length and round up.
         let block_count = input.len() / 16 + (input.len() % 16 != 0) as usize;
 
-        if block_count > self.config.max_block_count {
-            return Err(UniversalHashError::InputLengthError(input.len()));
+        if block_count > self.config.block_count {
+            return Err(UniversalHashError::input(format!(
+                "block length of input should be {} max, but is {}",
+                self.config.block_count, block_count
+            )));
         }
 
         let state = std::mem::replace(&mut self.state, State::Error);
 
         // Calling finalize when not setup is a fatal error.
         let State::Ready { core } = state else {
-            return Err(UniversalHashError::InvalidState("Key not set".to_string()));
-        };
-
-        // Compute new shares if the block count increased.
-        let core = if block_count > core.get_max_blocks() {
-            self.compute_add_shares(core.change_max_hashkey(block_count), ctx)
-                .await?
-        } else {
-            core
+            return Err(UniversalHashError::state("key not set"));
         };
 
         // Pad input to a multiple of 16 bytes.
@@ -192,6 +163,23 @@ where
     }
 }
 
+#[async_trait]
+impl<C, Ctx> Flush<Ctx> for Ghash<C>
+where
+    C: ShareConvert<Gf2_128> + Send,
+    Ctx: Context,
+{
+    type Error = UniversalHashError;
+
+    fn wants_flush(&self) -> bool {
+        todo!()
+    }
+
+    async fn flush(&mut self, ctx: &mut Ctx) -> Result<(), Self::Error> {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -211,7 +199,7 @@ mod tests {
         let (convert_a, convert_b) = ideal_share_converter();
 
         let config = GhashConfig::builder()
-            .initial_block_count(block_count)
+            .block_count(block_count)
             .build()
             .unwrap();
 
