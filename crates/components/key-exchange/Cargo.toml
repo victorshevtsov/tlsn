@@ -16,7 +16,6 @@ default = ["mock"]
 mock = []
 
 [dependencies]
-mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
 mpz-vm-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm"  }
 mpz-memory-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm"  }
 mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm"  }
@@ -28,8 +27,6 @@ mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch
 p256 = { workspace = true, features = ["ecdh", "serde"] }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
-serde = { workspace = true }
-futures = { workspace = true }
 serio = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "43995c5" }
 derive_builder = { workspace = true }
 tracing = { workspace = true }
@@ -37,6 +34,7 @@ rand = { workspace = true }
 
 [dev-dependencies]
 mpz-ot = {  git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" , features = ["ideal"] }
+mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
 
 rand_chacha = { workspace = true }
 rand_core = { workspace = true }

@@ -57,6 +57,7 @@ enum State {
         pms_0: P256,
         pms_1: P256,
     },
+    Complete,
     Error,
 }
 
@@ -116,7 +117,7 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
         } = std::mem::replace(&mut self.state, State::Error)
         else {
             return Err(KeyExchangeError::state(
-                "should be in ComputedECShares state to compute pms",
+                "should be in Setup state to compute pms",
             ));
         };
         let (pms_0, pms_1) = compute_ec_shares(
@@ -357,6 +358,7 @@ where
         let check = vm.decode(eq).map_err(KeyExchangeError::vm)?;
         let check = EqualityCheck(check);
 
+        self.state = State::Complete;
         Ok(check)
     }
 }
@@ -383,15 +385,14 @@ where
     }
 
     async fn flush(&mut self, ctx: &mut Ctx) -> Result<(), Self::Error> {
-        let state = std::mem::replace(&mut self.state, State::Error);
         if let Role::Leader = self.config.role() {
-            match state {
+            match &mut self.state {
                 State::SetServerKey {
                     server_key,
                     private_key,
                 } => {
                     ctx.io_mut()
-                        .send(server_key)
+                        .send(*server_key)
                         .await
                         .map_err(KeyExchangeError::io)?;
                     let follower_key = ctx
@@ -400,33 +401,33 @@ where
                         .await
                         .map_err(KeyExchangeError::io)?;
                     self.state = State::SetAllKeys {
-                        private_key,
-                        server_key,
+                        private_key: private_key.clone(),
+                        server_key: *server_key,
                         follower_key,
                     };
                 }
                 State::Setup { .. } => self.compute_ec_shares(ctx).await?,
-                _ => self.state = state,
+                _ => (),
             }
         } else {
-            match state {
+            match &mut self.state {
                 State::Initialized { private_key } => {
                     ctx.io_mut()
                         .send(private_key.public_key())
                         .await
                         .map_err(KeyExchangeError::io)?;
-                    let server_key = ctx
+                    let server_key: PublicKey = ctx
                         .io_mut()
                         .expect_next()
                         .await
                         .map_err(KeyExchangeError::io)?;
                     self.state = State::SetServerKey {
-                        private_key,
+                        private_key: private_key.clone(),
                         server_key,
                     };
                 }
                 State::Setup { .. } => self.compute_ec_shares(ctx).await?,
-                _ => self.state = state,
+                _ => (),
             }
         }
         Ok(())
@@ -483,11 +484,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::error::ErrorRepr;
-
     use super::*;
-
-    use mpz_common::executor::{test_st_executor, TestSTExecutor};
+    use crate::error::ErrorRepr;
+    use mpz_common::executor::test_st_executor;
     use mpz_core::Block;
     use mpz_garble::protocol::semihonest::{Evaluator, Generator};
     use mpz_memory_core::correlated::Delta;
@@ -501,11 +500,26 @@ mod tests {
     use rand_chacha::ChaCha12Rng;
     use rand_core::SeedableRng;
 
+    impl<C0, C1> MpcKeyExchange<C0, C1> {
+        fn set_private_key(&mut self, key: SecretKey) {
+            let State::Initialized { private_key } = &mut self.state else {
+                panic!("Can only set private key in initialized state")
+            };
+            *private_key = key;
+        }
+
+        fn set_pms_0(&mut self, pms: P256) {
+            let State::ComputedECShares { pms_0, .. } = &mut self.state else {
+                panic!("Can only set private key in initialized state")
+            };
+            *pms_0 = pms;
+        }
+    }
+
     #[tokio::test]
     async fn test_key_exchange() {
         let mut rng = ChaCha12Rng::from_seed([0_u8; 32]);
         let (mut ctx_a, mut ctx_b) = test_st_executor(8);
-        let (mut gen, mut ev) = mock_vm();
 
         let leader_private_key = SecretKey::random(&mut rng);
         let follower_private_key = SecretKey::random(&mut rng);
@@ -513,28 +527,19 @@ mod tests {
 
         let (mut leader, mut follower) = create_pair();
 
-        leader.private_key = Some(leader_private_key.clone());
-        follower.private_key = Some(follower_private_key.clone());
+        KeyExchange::<Generator<IdealCOTSender>>::alloc(&mut leader).unwrap();
+        KeyExchange::<Evaluator<IdealCOTReceiver>>::alloc(&mut follower).unwrap();
 
-        KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
-        KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
-        tokio::try_join!(
-            KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a),
-            KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(&mut follower, &mut ctx_b),
-        )
-        .unwrap();
+        leader.set_private_key(leader_private_key.clone());
+        follower.set_private_key(follower_private_key.clone());
+
+        KeyExchange::<Generator<IdealCOTSender>>::set_server_key(&mut leader, server_public_key)
+            .unwrap();
+
+        tokio::try_join!(leader.flush(&mut ctx_a), follower.flush(&mut ctx_b)).unwrap();
 
         let client_public_key =
-            KeyExchange::<_, Generator<IdealCOTSender>>::client_key(&mut leader, &mut ctx_a)
-                .await
-                .unwrap();
-        KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
-            &mut leader,
-            &mut ctx_a,
-            server_public_key,
-        )
-        .await
-        .unwrap();
+            KeyExchange::<Generator<IdealCOTSender>>::client_key(&leader).unwrap();
 
         let expected_client_public_key = PublicKey::from_affine(
             (leader_private_key.public_key().to_projective()
@@ -559,55 +564,58 @@ mod tests {
 
         let (mut leader, mut follower) = create_pair();
 
-        leader.private_key = Some(leader_private_key);
-        follower.private_key = Some(follower_private_key);
+        KeyExchange::<Generator<IdealCOTSender>>::alloc(&mut leader).unwrap();
+        KeyExchange::<Evaluator<IdealCOTReceiver>>::alloc(&mut follower).unwrap();
+
+        leader.set_private_key(leader_private_key.clone());
+        follower.set_private_key(follower_private_key.clone());
+
+        KeyExchange::<Generator<IdealCOTSender>>::set_server_key(&mut leader, server_public_key)
+            .unwrap();
+
+        tokio::try_join!(leader.flush(&mut ctx_a), follower.flush(&mut ctx_b)).unwrap();
+
+        assert_eq!(
+            KeyExchange::<Generator<IdealCOTSender>>::server_key(&leader).unwrap(),
+            server_public_key
+        );
+        assert_eq!(
+            KeyExchange::<Evaluator<IdealCOTReceiver>>::server_key(&follower).unwrap(),
+            server_public_key
+        );
+
+        let _client_public_key =
+            KeyExchange::<Generator<IdealCOTSender>>::client_key(&leader).unwrap();
+
+        leader.setup(&mut gen).unwrap();
+        follower.setup(&mut ev).unwrap();
+
+        tokio::try_join!(leader.flush(&mut ctx_a), follower.flush(&mut ctx_b)).unwrap();
+
+        let eq_check_leader = leader.compute_pms(&mut gen).unwrap();
+        let eq_check_follower = follower.compute_pms(&mut ev).unwrap();
 
         tokio::try_join!(
             async {
-                KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
-                KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a)
-                    .await
-                    .unwrap();
-
-                KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
-                    &mut leader,
-                    &mut ctx_a,
-                    server_public_key,
-                )
-                .await
-                .unwrap();
-
-                let check = leader.compute_pms(&mut ctx_a, &mut gen).await.unwrap();
                 gen.flush(&mut ctx_a).await.unwrap();
                 gen.execute(&mut ctx_a).await.unwrap();
                 gen.flush(&mut ctx_a)
                     .await
                     .map_err(KeyExchangeError::vm)
                     .unwrap();
-                check.check().await
+                eq_check_leader.check().await
             },
             async {
-                KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
-                KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(
-                    &mut follower,
-                    &mut ctx_b,
-                )
-                .await
-                .unwrap();
-                let check = follower.compute_pms(&mut ctx_b, &mut ev).await.unwrap();
                 ev.flush(&mut ctx_b).await.unwrap();
                 ev.execute(&mut ctx_b).await.unwrap();
                 ev.flush(&mut ctx_b)
                     .await
                     .map_err(KeyExchangeError::vm)
                     .unwrap();
-                check.check().await
+                eq_check_follower.check().await
             }
         )
         .unwrap();
-
-        assert_eq!(leader.server_key.unwrap(), server_public_key);
-        assert_eq!(follower.server_key.unwrap(), server_public_key);
     }
 
     #[tokio::test]
@@ -632,6 +640,7 @@ mod tests {
         let ((leader_share_0, leader_share_1), (follower_share_0, follower_share_1)) =
             tokio::try_join!(
                 compute_ec_shares(
+                    &mut ctx_leader,
                     Role::Leader,
                     &mut leader_converter_0,
                     &mut leader_converter_1,
@@ -639,6 +648,7 @@ mod tests {
                     server_public_key
                 ),
                 compute_ec_shares(
+                    &mut ctx_follower,
                     Role::Follower,
                     &mut follower_converter_0,
                     &mut follower_converter_1,
@@ -677,51 +687,50 @@ mod tests {
 
         let (mut leader, mut follower) = create_pair();
 
-        leader.private_key = Some(leader_private_key.clone());
-        follower.private_key = Some(follower_private_key.clone());
+        KeyExchange::<Generator<IdealCOTSender>>::alloc(&mut leader).unwrap();
+        KeyExchange::<Evaluator<IdealCOTReceiver>>::alloc(&mut follower).unwrap();
 
-        KeyExchange::<TestSTExecutor, _>::setup(&mut leader, &mut gen).unwrap();
-        KeyExchange::<TestSTExecutor, _>::setup(&mut follower, &mut ev).unwrap();
-        tokio::try_join!(
-            KeyExchange::<_, Generator<IdealCOTSender>>::preprocess(&mut leader, &mut ctx_a),
-            KeyExchange::<_, Evaluator<IdealCOTReceiver>>::preprocess(&mut follower, &mut ctx_b),
-        )
-        .unwrap();
+        leader.set_private_key(leader_private_key.clone());
+        follower.set_private_key(follower_private_key.clone());
 
-        KeyExchange::<_, Generator<IdealCOTSender>>::set_server_key(
-            &mut leader,
-            &mut ctx_a,
-            server_public_key,
-        )
-        .await
-        .unwrap();
+        KeyExchange::<Generator<IdealCOTSender>>::set_server_key(&mut leader, server_public_key)
+            .unwrap();
 
-        let ((mut share_a0, share_a1), (share_b0, share_b1)) = tokio::try_join!(
-            leader.compute_ec_shares(server_public_key, leader_private_key),
-            follower.compute_ec_shares(server_public_key, follower_private_key)
-        )
-        .unwrap();
+        tokio::try_join!(leader.flush(&mut ctx_a), follower.flush(&mut ctx_b)).unwrap();
 
-        share_a0 = share_a0 + P256::one();
+        let _client_public_key =
+            KeyExchange::<Generator<IdealCOTSender>>::client_key(&leader).unwrap();
 
-        let (check_leader, check_follower) = tokio::try_join!(
-            leader.compute_pms_with(&mut gen, share_a0, share_a1),
-            follower.compute_pms_with(&mut ev, share_b0, share_b1)
-        )
-        .unwrap();
+        leader.setup(&mut gen).unwrap();
+        follower.setup(&mut ev).unwrap();
+
+        tokio::try_join!(leader.flush(&mut ctx_a), follower.flush(&mut ctx_b)).unwrap();
+
+        // Now manipulate pms
+        leader.set_pms_0(P256::one());
+        follower.set_pms_0(P256::one());
+
+        let eq_check_leader = leader.compute_pms(&mut gen).unwrap();
+        let eq_check_follower = follower.compute_pms(&mut ev).unwrap();
 
         let (leader_res, follower_res) = tokio::join!(
             async {
                 gen.flush(&mut ctx_a).await.unwrap();
                 gen.execute(&mut ctx_a).await.unwrap();
-                gen.flush(&mut ctx_a).await.unwrap();
-                check_leader.check().await
+                gen.flush(&mut ctx_a)
+                    .await
+                    .map_err(KeyExchangeError::vm)
+                    .unwrap();
+                eq_check_leader.check().await
             },
             async {
                 ev.flush(&mut ctx_b).await.unwrap();
                 ev.execute(&mut ctx_b).await.unwrap();
-                ev.flush(&mut ctx_b).await.unwrap();
-                check_follower.check().await
+                ev.flush(&mut ctx_b)
+                    .await
+                    .map_err(KeyExchangeError::vm)
+                    .unwrap();
+                eq_check_follower.check().await
             }
         );
 
@@ -837,6 +846,7 @@ mod tests {
         assert_eq!(res_gen, [0_u8; 32]);
     }
 
+    #[allow(clippy::type_complexity)]
     fn create_pair() -> (
         MpcKeyExchange<IdealShareConvertSender<P256>, IdealShareConvertReceiver<P256>>,
         MpcKeyExchange<IdealShareConvertReceiver<P256>, IdealShareConvertSender<P256>>,

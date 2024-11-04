@@ -125,8 +125,8 @@ mod tests {
         let (mut c_a, mut c_b) = ideal_share_convert(Block::ZERO);
 
         let (a, b) = tokio::try_join!(
-            derive_x_coord_share(Role::Leader, &mut ctx_a, &mut c_a, p1),
-            derive_x_coord_share(Role::Follower, &mut ctx_b, &mut c_b, p2)
+            derive_x_coord_share(&mut ctx_a, Role::Leader, &mut c_a, p1),
+            derive_x_coord_share(&mut ctx_b, Role::Follower, &mut c_b, p2)
         )
         .unwrap();
 

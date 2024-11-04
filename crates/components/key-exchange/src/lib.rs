@@ -70,7 +70,7 @@ impl EqualityCheck {
 
 /// A trait for the 3-party key exchange protocol.
 pub trait KeyExchange<V> {
-    /// Allocated necessary computational resources.
+    /// Allocate necessary computational resources.
     fn alloc(&mut self) -> Result<(), KeyExchangeError>;
 
     /// Sets the server's public key.
