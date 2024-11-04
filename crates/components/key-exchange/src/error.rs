@@ -99,12 +99,6 @@ impl From<mpz_common::ContextError> for KeyExchangeError {
     }
 }
 
-impl From<mpz_share_conversion::ShareConversionError> for KeyExchangeError {
-    fn from(value: mpz_share_conversion::ShareConversionError) -> Self {
-        Self::share_conversion(value)
-    }
-}
-
 impl From<p256::elliptic_curve::Error> for KeyExchangeError {
     fn from(value: p256::elliptic_curve::Error) -> Self {
         Self::key(value)

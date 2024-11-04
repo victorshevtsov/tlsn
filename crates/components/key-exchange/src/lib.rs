@@ -28,7 +28,6 @@ pub use config::{
 pub use error::KeyExchangeError;
 pub use exchange::MpcKeyExchange;
 
-use async_trait::async_trait;
 use mpz_core::bitvec::BitVec;
 use mpz_memory_core::{binary::U8, Array, DecodeFutureTyped};
 use p256::PublicKey;
@@ -70,37 +69,29 @@ impl EqualityCheck {
 }
 
 /// A trait for the 3-party key exchange protocol.
-#[async_trait]
-pub trait KeyExchange<Ctx, V> {
-    /// Gets the server's public key.
-    fn server_key(&self) -> Option<PublicKey>;
+pub trait KeyExchange<V> {
+    /// Allocate necessary computational resources.
+    fn alloc(&mut self) -> Result<(), KeyExchangeError>;
 
     /// Sets the server's public key.
-    async fn set_server_key(
-        &mut self,
-        ctx: &mut Ctx,
-        server_key: PublicKey,
-    ) -> Result<(), KeyExchangeError>;
+    fn set_server_key(&mut self, server_key: PublicKey) -> Result<(), KeyExchangeError>;
+
+    /// Gets the server's public key.
+    fn server_key(&self) -> Option<PublicKey>;
 
     /// Computes the client's public key.
     ///
     /// The client's public key in this context is the combined public key (EC
     /// point addition) of the leader's public key and the follower's public
     /// key.
-    async fn client_key(&mut self, ctx: &mut Ctx) -> Result<PublicKey, KeyExchangeError>;
+    fn client_key(&self) -> Result<PublicKey, KeyExchangeError>;
 
     /// Performs any necessary one-time setup, returning a reference to the PMS.
-    ///
-    /// The PMS will not be assigned until `compute_pms` is called.
     fn setup(&mut self, vm: &mut V) -> Result<Pms, KeyExchangeError>;
 
-    /// Preprocesses the key exchange.
-    async fn preprocess(&mut self, ctx: &mut Ctx) -> Result<(), KeyExchangeError>;
-
-    /// Computes the PMS.
-    async fn compute_pms(
-        &mut self,
-        ctx: &mut Ctx,
-        vm: &mut V,
-    ) -> Result<EqualityCheck, KeyExchangeError>;
+    /// Computes the PMS, and returns an equality check.
+    ///
+    /// The equality check makes sure that both parties arrived at the same result. This MUST be
+    /// called to prevent malicious behavior!
+    fn compute_pms(&mut self, vm: &mut V) -> Result<EqualityCheck, KeyExchangeError>;
 }

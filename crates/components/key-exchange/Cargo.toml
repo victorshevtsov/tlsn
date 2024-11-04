@@ -16,27 +16,25 @@ default = ["mock"]
 mock = []
 
 [dependencies]
-mpz-garble = { workspace = true }
-mpz-vm-core = { workspace = true }
-mpz-memory-core = { workspace = true }
-mpz-common = { workspace = true }
-mpz-fields = { workspace = true }
-mpz-share-conversion = { workspace = true, features = ["ideal"] }
-mpz-circuits = { workspace = true }
-mpz-core = { workspace = true }
+mpz-vm-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm"  }
+mpz-memory-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm"  }
+mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm"  }
+mpz-fields = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm"  }
+mpz-share-conversion = { git ="https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" , features = ["test-utils"] }
+mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm"  }
+mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm"  }
 
 p256 = { workspace = true, features = ["ecdh", "serde"] }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
-serde = { workspace = true }
-futures = { workspace = true }
-serio = { workspace = true }
+serio = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "43995c5" }
 derive_builder = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
 
 [dev-dependencies]
-mpz-ot = { workspace = true, features = ["ideal"] }
+mpz-ot = {  git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" , features = ["ideal"] }
+mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
 
 rand_chacha = { workspace = true }
 rand_core = { workspace = true }
