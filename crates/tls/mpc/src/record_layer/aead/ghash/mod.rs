@@ -30,6 +30,11 @@ impl Tag {
     ///
     /// # Arguments
     ///
+    /// * `ctx`         - The context for IO.
+    /// * `ghash`       - An instance for computing ghash.
+    /// * `j0`          - A share of the j0 block.
+    /// * `ciphertext`  - A future resolving to ciphertext.
+    /// * `aad`         - Additional data for AEAD.
     pub(crate) async fn compute<Ctx, C, J, Sc>(
         ctx: &mut Ctx,
         ghash: &mut Ghash<Sc>,
@@ -68,7 +73,7 @@ impl Tag {
         Ok(tag)
     }
 
-    /// Verifies a purported tag against`self`.
+    /// Verifies a purported tag against `self`.
     ///
     /// Verifying a tag requires a commit-reveal protocol between the leader and
     /// follower. Without it, the party which receives the other's tag share first
