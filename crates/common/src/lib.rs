@@ -19,13 +19,13 @@ pub type BaseOTSender = mpz_ot::chou_orlandi::Sender;
 /// Base OT receiver.
 pub type BaseOTReceiver = mpz_ot::chou_orlandi::Receiver;
 /// OT sender.
-pub type OTSender = mpz_ot::kos::SharedSender<BaseOTReceiver>;
+pub type OTSender = mpz_ot::kos::Sender<BaseOTReceiver>;
 /// OT receiver.
-pub type OTReceiver = mpz_ot::kos::SharedReceiver<BaseOTSender>;
+pub type OTReceiver = mpz_ot::kos::Receiver<BaseOTSender>;
 /// MPC executor.
-pub type Executor = mpz_common::executor::MTExecutor<MuxControl>;
+pub type Executor = mpz_common::executor::mt::MTExecutor<MuxControl>;
 /// MPC thread context.
-pub type Context = mpz_common::executor::MTContext<MuxControl, Io>;
+pub type Context = mpz_common::executor::mt::MTContext<MuxControl>;
 
 /// The party's role in the TLSN protocol.
 ///
