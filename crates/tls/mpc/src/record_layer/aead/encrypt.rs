@@ -61,7 +61,7 @@ impl TagCreator {
     ) -> Result<(Vec<u8>, Vec<u8>), MpcTlsError>
     where
         Ctx: Context,
-        U: UniversalHash<Ctx>,
+        U: UniversalHash,
     {
         let j0 = self.j0.decode().await?;
         let aad = self.aad;

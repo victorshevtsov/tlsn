@@ -50,7 +50,7 @@ tracing = { workspace = true }
 rand = { workspace = true }
 
 [dev-dependencies]
-serio = { version = "0.1", features = ["compat"] }
+serio = { workspace = true, features = ["compat"] }
 tls-server-fixture = { workspace = true }
 tlsn-tls-client = { workspace = true }
 tlsn-tls-client-async = { workspace = true }

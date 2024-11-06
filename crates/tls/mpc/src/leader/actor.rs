@@ -52,10 +52,10 @@ impl MpcTlsLeaderCtrl {
 impl<K, P, C, U, Ctx, V> MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -86,10 +86,10 @@ where
 impl<K, P, C, U, Ctx, V> Actor for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -108,10 +108,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for MpcTlsLeaderMsg
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -487,10 +487,10 @@ impl MpcTlsLeaderCtrl {
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetProtocolVersion
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -507,10 +507,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetProtocolVersion> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -526,10 +526,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetCipherSuite
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -546,10 +546,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetCipherSuite> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -565,10 +565,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgGetSuite
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -585,10 +585,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetSuite> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -604,10 +604,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetEncrypt
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -624,10 +624,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetEncrypt> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -643,10 +643,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetDecrypt
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -663,10 +663,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetDecrypt> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -682,10 +682,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgGetClientRandom
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -702,10 +702,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetClientRandom> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -721,10 +721,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgGetClientKeyShare
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -741,10 +741,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetClientKeyShare> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -760,10 +760,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetServerRandom
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -780,10 +780,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetServerRandom> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -799,10 +799,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetServerKeyShare
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -819,10 +819,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetServerKeyShare> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -839,10 +839,10 @@ impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
     for BackendMsgSetServerCertDetails
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -860,10 +860,10 @@ impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetServerCertDetails>
     for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -879,10 +879,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetServerKxDetails
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -899,10 +899,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetServerKxDetails> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -919,10 +919,10 @@ impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
     for BackendMsgSetHsHashClientKeyExchange
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -940,10 +940,10 @@ impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetHsHashClientKeyExchange>
     for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -960,10 +960,10 @@ impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
     for BackendMsgSetHsHashServerHello
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -981,10 +981,10 @@ impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetHsHashServerHello>
     for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1001,10 +1001,10 @@ impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
     for BackendMsgGetServerFinishedVd
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1021,10 +1021,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetServerFinishedVd> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1041,10 +1041,10 @@ impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
     for BackendMsgGetClientFinishedVd
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1061,10 +1061,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetClientFinishedVd> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1080,10 +1080,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgPrepareEncryption
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1100,10 +1100,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgPrepareEncryption> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1119,10 +1119,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgEncrypt
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1139,10 +1139,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgEncrypt> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1158,10 +1158,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgDecrypt
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1178,10 +1178,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgDecrypt> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1197,10 +1197,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgBufferIncoming
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1217,10 +1217,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgBufferIncoming> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1236,10 +1236,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgNextIncoming
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1256,10 +1256,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgNextIncoming> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1275,10 +1275,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgGetNotify
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1295,10 +1295,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetNotify> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1314,10 +1314,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgBufferLen
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1334,10 +1334,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgBufferLen> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1353,10 +1353,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgServerClosed
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1373,10 +1373,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<BackendMsgServerClosed> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1392,10 +1392,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for DeferDecryption
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1412,10 +1412,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<DeferDecryption> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1431,10 +1431,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for CloseConnection
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1451,10 +1451,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<CloseConnection> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1470,10 +1470,10 @@ where
 impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for Commit
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1490,10 +1490,10 @@ where
 impl<K, P, C, U, Ctx, V> Handler<Commit> for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {

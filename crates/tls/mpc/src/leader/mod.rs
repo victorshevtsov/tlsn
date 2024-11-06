@@ -67,10 +67,10 @@ pub struct MpcTlsLeader<K, P, C, U, Ctx, V> {
 impl<K, P, C, U, Ctx, V> MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -194,10 +194,10 @@ where
 impl<K, P, C, U, Ctx, V> Backend for MpcTlsLeader<K, P, C, U, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<Ctx, V> + Send,
+    K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash<Ctx> + Send,
+    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {

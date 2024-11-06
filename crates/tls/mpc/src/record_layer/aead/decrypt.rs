@@ -90,7 +90,7 @@ impl PlainText {
     ) -> Result<Vector<U8>, MpcTlsError>
     where
         Ctx: Context,
-        U: UniversalHash<Ctx>,
+        U: UniversalHash,
     {
         let PlainText {
             role,
