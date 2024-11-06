@@ -1,23 +1,23 @@
-//! This module implements [`UniversalHash`](super::UniversalHash) for Ghash.
+//! This module implements Ghash.
 
-use crate::{decode::OneTimePadShared, MpcTlsError, TlsRole};
+use crate::{MpcTlsError, TlsRole};
 use mpz_common::Context;
 use mpz_core::{
     commit::{Decommitment, HashCommit},
     hash::Hash,
 };
-use mpz_fields::gf2_128::Gf2_128;
-use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
 use serde::{Deserialize, Serialize};
 use serio::{stream::IoStreamExt, SinkExt};
-use std::{future::Future, ops::Add};
+use std::ops::Add;
 use tracing::instrument;
 
 mod error;
 mod ghash_core;
 mod ghash_inner;
 pub(crate) use error::UniversalHashError;
-pub(crate) use ghash_inner::{Ghash, GhashConfig, GhashConfigBuilder, GhashConfigBuilderError};
+pub(crate) use ghash_inner::{
+    Ghash, GhashCompute, GhashConfig, GhashConfigBuilder, GhashConfigBuilderError,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Tag(Vec<u8>);
@@ -30,30 +30,25 @@ impl Tag {
     ///
     /// # Arguments
     ///
-    /// * `ctx`         - The context for IO.
-    /// * `ghash`       - An instance for computing ghash.
-    /// * `j0`          - A share of the j0 block.
-    /// * `ciphertext`  - A future resolving to ciphertext.
-    /// * `aad`         - Additional data for AEAD.
-    pub(crate) async fn compute<Ctx, C, J, Sc>(
+    /// * `ctx` - The context for IO.
+    /// * `ghash` - An instance for computing ghash.
+    /// * `j0` - A share of the j0 block.
+    /// * `ciphertext` - A future resolving to ciphertext.
+    /// * `aad`- Additional data for AEAD.
+    pub(crate) async fn compute<Ctx>(
         ctx: &mut Ctx,
-        ghash: &mut Ghash<Sc>,
-        j0: OneTimePadShared,
-        ciphertext: C,
+        ghash: &GhashCompute,
+        j0: Vec<u8>,
+        ciphertext: &Vec<u8>,
         aad: Vec<u8>,
     ) -> Result<Self, MpcTlsError>
     where
         Ctx: Context,
-        C: Future<Output = Result<Vec<u8>, MpcTlsError>>,
-        Sc: ShareConvert<Gf2_128>,
-        Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
-        Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
     {
-        let j0 = j0.decode().await?;
-        let ciphertext = ciphertext.await?;
+        let ciphertext = ciphertext;
 
         let ciphertext_padded = build_ghash_data(aad, ciphertext.clone());
-        let hash = ghash.finalize(ciphertext_padded)?;
+        let hash = ghash.compute(ciphertext_padded)?;
 
         let tag_share = j0
             .into_iter()
@@ -82,8 +77,8 @@ impl Tag {
     ///
     /// # Arguments
     ///
-    /// * `ctx`           - The context for IO.
-    /// * `role`          - The role of the party.
+    /// * `ctx` - The context for IO.
+    /// * `role` - The role of the party.
     /// * `purported_tag` - The tag to verify against `self`.
     #[instrument(level = "debug", skip_all, err)]
     pub(crate) async fn verify<Ctx: Context>(
