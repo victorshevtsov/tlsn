@@ -4,23 +4,22 @@ use crate::{
     decode::{Decode, OneTimePadShared},
     MpcTlsError, TlsRole,
 };
-use cipher::{aes::Aes128, CipherCircuit, Keystream};
-use futures::TryFutureExt;
+use cipher::{aes::Aes128, Keystream};
+use futures::{TryFuture, TryFutureExt};
 use mpz_common::Context;
 use mpz_core::bitvec::BitVec;
-use mpz_fields::gf2_128::Gf2_128;
 use mpz_memory_core::{
     binary::{Binary, U8},
-    MemoryExt, Repr, StaticSize, Vector, View, ViewExt,
+    DecodeError, MemoryExt, StaticSize, Vector, View,
 };
 use mpz_memory_core::{DecodeFutureTyped, Memory};
 use mpz_memory_core::{FromRaw, Slice, ToRaw};
-use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
 use mpz_vm_core::Vm;
-use tracing::instrument;
 
 pub(crate) mod ghash;
 use ghash::{Ghash, GhashCompute, GhashConfig, GhashConfigBuilder, GhashConfigBuilderError, Tag};
+
+const START_COUNTER: u32 = 2;
 
 pub(crate) struct AesGcmEncrypt {
     role: TlsRole,
@@ -51,24 +50,42 @@ impl AesGcmEncrypt {
     /// # Arguments
     ///
     /// * `vm` - A virtual machine for 2PC.
-    /// * `j0` - The j0 block for AES-GCM.
-    /// * `ciphertext` - The ciphertext to encrypt.
+    /// * `plaintext_ref` - The VM plaintext reference.
+    /// * `explicit_nonce` - The TLS explicit nonce.
+    /// * `plaintext` - The plaintext to encrypt.
     /// * `aad` - Additional data for AEAD.
-    pub(crate) fn encrypt<V, C>(
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn encrypt<V>(
         &mut self,
         vm: &mut V,
-        j0: <C as CipherCircuit>::Block,
-        ciphertext: Vector<U8>,
-        aad: Vec<u8>,
-    ) -> Result<Encrypt, MpcTlsError>
+        plaintext_ref: Vector<U8>,
+        explicit_nonce: [u8; 8],
+        plaintext: Vec<u8>,
+        aad: [u8; 13],
+    ) -> Result<
+        (
+            Encrypt<'_, DecodeFutureTyped<BitVec<u32>, Vec<u8>>>,
+            Vector<U8>,
+        ),
+        MpcTlsError,
+    >
     where
         V: Vm<Binary> + Memory<Binary> + View<Binary>,
-        C: CipherCircuit,
     {
+        let j0 = self.keystream.j0(vm, explicit_nonce)?;
         let j0 = Decode::new(vm, self.role, transmute(j0))?;
         let j0 = j0.shared(vm)?;
 
-        let ciphertext = vm.decode(ciphertext).map_err(MpcTlsError::vm)?;
+        let keystream = self.keystream.chunk_sufficient(plaintext.len())?;
+
+        let cipher_out = keystream
+            .apply(vm, plaintext_ref)
+            .map_err(MpcTlsError::vm)?;
+        let cipher_ref = cipher_out
+            .assign(vm, explicit_nonce, START_COUNTER, plaintext)
+            .map_err(MpcTlsError::vm)?;
+
+        let ciphertext = vm.decode(cipher_ref).map_err(MpcTlsError::vm)?;
         let encrypt = Encrypt {
             j0,
             ghash: &self.ghash,
@@ -76,20 +93,35 @@ impl AesGcmEncrypt {
             aad,
         };
 
-        Ok(encrypt)
+        Ok((encrypt, cipher_ref))
     }
 }
 
 /// Encrypts a ciphertext.
-pub(crate) struct Encrypt<'a> {
+pub(crate) struct Encrypt<'a, F> {
     j0: OneTimePadShared,
     ghash: &'a GhashCompute,
-    ciphertext: DecodeFutureTyped<BitVec<u32>, Vec<u8>>,
-    aad: Vec<u8>,
+    ciphertext: F,
+    aad: [u8; 13],
 }
 
-impl<'a> Encrypt<'a> {
-    /// Performs computation for encrypting a ciphertext.
+impl<'a, F> Encrypt<'a, F>
+where
+    F: TryFuture<Ok = Vec<u8>, Error = DecodeError>,
+{
+    /// Transforms the inner ciphertext future with a closure.
+    ///
+    /// # Arguments
+    ///
+    /// * `func` - The provided closure.
+    pub(crate) fn map_cipher<T, U>(self, func: T) -> impl TryFuture<Ok = U, Error = DecodeError>
+    where
+        T: FnOnce(F::Ok) -> U,
+    {
+        self.ciphertext.map_ok(func)
+    }
+
+    /// Computes the ciphertext.
     ///
     /// # Arguments
     ///
@@ -99,10 +131,11 @@ impl<'a> Encrypt<'a> {
         Ctx: Context,
     {
         let j0 = self.j0.decode().map_err(MpcTlsError::decode);
+        let aad = self.aad.to_vec();
         let ciphertext = self.ciphertext.map_err(MpcTlsError::decode);
         let (j0, mut ciphertext) = futures::try_join!(j0, ciphertext)?;
 
-        let tag = Tag::compute(ctx, self.ghash, j0, &ciphertext, self.aad).await?;
+        let tag = Tag::compute(ctx, self.ghash, j0, &ciphertext, aad).await?;
         ciphertext.extend(tag.into_inner());
 
         Ok(ciphertext)

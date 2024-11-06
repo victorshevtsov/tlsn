@@ -1,3 +1,4 @@
+use cipher::CipherError;
 use hmac_sha256::PrfError;
 use key_exchange::KeyExchangeError;
 use mpz_memory_core::DecodeError;
@@ -22,6 +23,8 @@ enum ErrorRepr {
     KeyExchange(Box<dyn Error + Send + Sync + 'static>),
     /// An error occurred during PRF
     Prf(Box<dyn Error + Send + Sync + 'static>),
+    /// A stream cipher error
+    Cipher(Box<dyn Error + Send + Sync + 'static>),
     /// An error occurred during encryption
     Encrypt(Box<dyn Error + Send + Sync + 'static>),
     /// An error occurred during decryption
@@ -50,6 +53,7 @@ impl Display for ErrorRepr {
             ErrorRepr::Io(error) => write!(f, "{error}"),
             ErrorRepr::KeyExchange(error) => write!(f, "{error}"),
             ErrorRepr::Prf(error) => write!(f, "{error}"),
+            ErrorRepr::Cipher(error) => write!(f, "{error}"),
             ErrorRepr::Encrypt(error) => write!(f, "{error}"),
             ErrorRepr::Decrypt(error) => write!(f, "{error}"),
             ErrorRepr::Tag(error) => write!(f, "{error}"),
@@ -97,6 +101,13 @@ impl MpcTlsError {
         E: Into<Box<dyn Error + Send + Sync + 'static>>,
     {
         Self(ErrorRepr::Prf(err.into()))
+    }
+
+    pub(crate) fn cipher<E>(err: E) -> MpcTlsError
+    where
+        E: Into<Box<dyn Error + Send + Sync + 'static>>,
+    {
+        Self(ErrorRepr::Cipher(err.into()))
     }
 
     pub(crate) fn encrypt<E>(err: E) -> MpcTlsError
@@ -184,6 +195,12 @@ impl From<DecodeError> for MpcTlsError {
 impl From<PrfError> for MpcTlsError {
     fn from(value: PrfError) -> Self {
         MpcTlsError::prf(value)
+    }
+}
+
+impl From<CipherError> for MpcTlsError {
+    fn from(value: CipherError) -> Self {
+        MpcTlsError::cipher(value)
     }
 }
 

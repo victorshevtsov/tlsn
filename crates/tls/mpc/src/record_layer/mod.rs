@@ -1,80 +1,77 @@
 //! TLS record layer.
 
-use crate::{transcript::Transcript, MpcTlsError, TlsRole};
-use cipher::{CipherCircuit, Keystream};
-use mpz_circuits::types::ToBinaryRepr;
-use mpz_memory_core::{binary::Binary, Memory, MemoryExt, View, ViewExt};
-use mpz_vm_core::{Vm, VmExt};
+use crate::{transcript::Transcript, MpcTlsError};
+use futures::TryFutureExt;
+use mpz_memory_core::{
+    binary::{Binary, U8},
+    MemoryExt, Vector, View,
+};
+use mpz_vm_core::Vm;
+use std::future::Future;
 use tls_core::{
     cipher::make_tls12_aad,
     msgs::{
         base::Payload,
-        enums::{ContentType, ProtocolVersion},
         message::{OpaqueMessage, PlainMessage},
     },
 };
 
 pub(crate) mod aead;
+use aead::AesGcmEncrypt;
 
-const START_COUNTER: u32 = 2;
-
-pub(crate) async fn encrypt_private<V, C>(
-    vm: &mut V,
-    role: TlsRole,
-    transcript: &mut Transcript,
-    keystream: &mut Keystream<C>,
-    msg: PlainMessage,
-) -> Result<OpaqueMessage, MpcTlsError>
-where
-    V: Vm<Binary> + View<Binary>,
-    C: CipherCircuit,
-{
-    todo!()
-    //  let PlainMessage {
-    //      typ,
-    //      version,
-    //      payload,
-    //  } = msg;
-
-    //  let (seq, _) = transcript.seq();
-    //  let len = payload.0.len();
-    //  let explicit_nonce = seq.to_be_bytes().to_vec();
-    //  let aad = make_tls12_aad(seq, typ, version, len);
-    //  let plaintext = payload.0;
-
-    //  let plaintext_ref = vm.alloc().map_err(MpcTlsError::vm)?;
-    //  vm.mark_private(plaintext_ref);
-
-    //  let keystream = keystream.chunk_sufficient(plaintext.len())?;
-    //  let cipher_out = keystream.apply(vm, plaintext_ref)?;
-    //  let ciphertext = cipher_out.assign(vm, explicit_nonce.clone(), START_COUNTER, plaintext)?;
-
-    //  transcript.record_sent(typ, ciphertext);
-
-    //  let j0 = keystream.j0(vm, explicit_nonce.clone())?;
-    //  let tag prepare_tag_for_encrypt(vm, role, j0, ciphertext, aad)
-    //  // TODO: Encrypt here
-
-    //  let mut payload = explicit_nonce;
-    //  payload.extend(ciphertext);
-
-    //  Ok(OpaqueMessage {
-    //      typ,
-    //      version,
-    //      payload: Payload::new(payload),
-    //  })
+pub(crate) struct Encrypter {
+    transcript: Transcript,
+    aes: AesGcmEncrypt,
 }
 
-pub(crate) async fn encrypt_blind(
-    typ: ContentType,
-    version: ProtocolVersion,
-    len: usize,
-) -> Result<(), MpcTlsError> {
-    todo!()
-}
+impl Encrypter {
+    pub(crate) fn encrypt<V, Vis, Err>(
+        &mut self,
+        vm: &mut V,
+        msg: PlainMessage,
+        visibility: Vis,
+    ) -> Result<impl Future<Output = Result<OpaqueMessage, MpcTlsError>>, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+        Vis: FnOnce(&mut V, Vector<U8>) -> Result<(), Err>,
+        Err: std::error::Error + Send + Sync + 'static,
+    {
+        let PlainMessage {
+            typ,
+            version,
+            payload,
+        } = msg;
 
-pub(crate) async fn encrypt_public(msg: PlainMessage) -> Result<OpaqueMessage, MpcTlsError> {
-    todo!()
+        let seq = self.transcript.seq();
+        let len = payload.0.len();
+        let explicit_nonce = seq.to_be_bytes();
+        let aad = make_tls12_aad(seq, typ, version, len);
+        let plaintext = payload.0;
+
+        let plaintext_ref: Vector<U8> = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
+        visibility(vm, plaintext_ref).map_err(MpcTlsError::vm)?;
+
+        let (encrypt, cipher_ref) =
+            self.aes
+                .encrypt(vm, plaintext_ref, explicit_nonce, plaintext, aad)?;
+
+        self.transcript.record(typ, cipher_ref);
+
+        let encrypt = encrypt
+            .map_cipher(move |ciphertext| {
+                let mut payload = explicit_nonce.to_vec();
+                payload.extend(ciphertext);
+
+                OpaqueMessage {
+                    typ,
+                    version,
+                    payload: Payload::new(payload),
+                }
+            })
+            .map_err(MpcTlsError::decode);
+
+        Ok(encrypt)
+    }
 }
 
 pub(crate) async fn decrypt_private(msg: OpaqueMessage) -> Result<PlainMessage, MpcTlsError> {
