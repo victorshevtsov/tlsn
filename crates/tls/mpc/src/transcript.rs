@@ -23,7 +23,7 @@ impl Transcript {
         (self.sent.seq, self.recv.seq)
     }
 
-    pub(crate) fn size(&self) -> (u64, u64) {
+    pub(crate) fn size(&self) -> (usize, usize) {
         (self.sent.size, self.recv.size)
     }
 

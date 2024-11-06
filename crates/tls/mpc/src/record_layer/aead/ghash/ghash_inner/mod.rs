@@ -1,9 +1,9 @@
-use crate::{
+use crate::record_layer::aead::{
+    ghash::error::UniversalHashError,
     ghash::ghash_core::{
         state::{Finalized, Intermediate},
         GhashCore,
     },
-    UniversalHash, UniversalHashError,
 };
 use async_trait::async_trait;
 use mpz_common::{Context, Flush};
@@ -11,11 +11,9 @@ use mpz_core::Block;
 use mpz_fields::gf2_128::Gf2_128;
 use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
 use std::fmt::Debug;
-use tracing::instrument;
 
 mod config;
-
-pub use config::{GhashConfig, GhashConfigBuilder, GhashConfigBuilderError};
+pub(crate) use config::{GhashConfig, GhashConfigBuilder, GhashConfigBuilderError};
 
 #[derive(Debug)]
 enum State {
@@ -29,7 +27,7 @@ enum State {
 /// This is the common instance used by both sender and receiver.
 ///
 /// It is an aio wrapper which mostly uses [`GhashCore`] for computation.
-pub struct Ghash<C> {
+pub(crate) struct Ghash<C> {
     state: State,
     config: GhashConfig,
     converter: C,
@@ -47,7 +45,7 @@ where
     /// * `config`      - The configuration for this Ghash instance.
     /// * `converter`   - An instance which allows to convert multiplicative into additive shares
     ///                   and vice versa.
-    pub fn new(config: GhashConfig, converter: C) -> Self {
+    pub(crate) fn new(config: GhashConfig, converter: C) -> Self {
         Self {
             state: State::Init,
             config,
@@ -56,7 +54,7 @@ where
     }
 
     /// Allocates resources needed for ghash.
-    pub fn alloc(&mut self) -> Result<(), UniversalHashError> {
+    pub(crate) fn alloc(&mut self) -> Result<(), UniversalHashError> {
         // We need only half the number of `block_count` M2As because of the free
         // squaring trick and we need one extra A2M conversion in the beginning.
         // Both M2A and A2M, each require a single OLE.
@@ -77,7 +75,7 @@ where
     /// # Arguments
     ///
     /// * `key` - Key to use for the hash function.
-    pub fn set_key(&mut self, key: Vec<u8>) -> Result<(), UniversalHashError> {
+    pub(crate) fn set_key(&mut self, key: Vec<u8>) -> Result<(), UniversalHashError> {
         if key.len() != 16 {
             return Err(UniversalHashError::key(format!(
                 "key length should be 16 bytes but is {}",
@@ -106,7 +104,7 @@ where
     /// # Arguments
     ///
     /// * `input` - Input to hash.
-    pub fn finalize(&mut self, mut input: Vec<u8>) -> Result<Vec<u8>, UniversalHashError> {
+    pub(crate) fn finalize(&mut self, mut input: Vec<u8>) -> Result<Vec<u8>, UniversalHashError> {
         // Divide by block length and round up.
         let block_count = input.len() / 16 + (input.len() % 16 != 0) as usize;
 
@@ -262,23 +260,9 @@ where
     }
 }
 
-impl<C> UniversalHash for Ghash<C>
-where
-    C: ShareConvert<Gf2_128> + Send,
-{
-    fn set_key(&mut self, _key: Vec<u8>) -> Result<(), UniversalHashError> {
-        unimplemented!()
-    }
-
-    #[instrument(level = "debug", skip_all, err)]
-    fn finalize(&mut self, _input: Vec<u8>) -> Result<Vec<u8>, UniversalHashError> {
-        unimplemented!()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::ghash::{Ghash, GhashConfig};
+    use crate::record_layer::aead::ghash::{Ghash, GhashConfig};
     use ghash_rc::{
         universal_hash::{KeyInit, UniversalHash as UniversalHashReference},
         GHash as GhashReference,

@@ -1,4 +1,4 @@
-//! Message authentication.
+//! This module implements [`UniversalHash`](super::UniversalHash) for Ghash.
 
 use crate::{MpcTlsError, TlsRole};
 use mpz_common::Context;
@@ -10,6 +10,12 @@ use serde::{Deserialize, Serialize};
 use serio::{stream::IoStreamExt, SinkExt};
 use std::ops::Add;
 use tracing::instrument;
+
+mod error;
+mod ghash_core;
+mod ghash_inner;
+pub(crate) use error::UniversalHashError;
+pub(crate) use ghash_inner::{Ghash, GhashConfig, GhashConfigBuilder, GhashConfigBuilderError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Tag(Vec<u8>);

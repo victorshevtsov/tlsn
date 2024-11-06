@@ -29,7 +29,6 @@ use tls_core::{
     },
     suites::SupportedCipherSuite,
 };
-use tlsn_universal_hash::UniversalHash;
 use tracing::{instrument, trace};
 
 mod actor;
@@ -39,7 +38,7 @@ use actor::MpcTlsLeaderCtrl;
 pub type LeaderCtrl = MpcTlsLeaderCtrl;
 
 /// MPC-TLS leader.
-pub struct MpcTlsLeader<K, P, C, U, Ctx, V> {
+pub struct MpcTlsLeader<K, P, C, Ctx, V> {
     config: MpcTlsLeaderConfig,
     channel: MpcTlsChannel,
 
@@ -48,7 +47,6 @@ pub struct MpcTlsLeader<K, P, C, U, Ctx, V> {
     ke: K,
     prf: P,
     cipher: C,
-    hash: U,
     ctx: Ctx,
     vm: V,
     /// When set, notifies the backend that there are TLS messages which need to
@@ -64,13 +62,12 @@ pub struct MpcTlsLeader<K, P, C, U, Ctx, V> {
     prf_out: Option<PrfOutput>,
 }
 
-impl<K, P, C, U, Ctx, V> MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -81,7 +78,6 @@ where
         ke: K,
         prf: P,
         cipher: C,
-        hash: U,
         ctx: Ctx,
         vm: V,
     ) -> Self {
@@ -94,7 +90,6 @@ where
             ke,
             prf,
             cipher,
-            hash,
             ctx,
             vm,
             notifier: BackendNotifier::new(),
@@ -191,13 +186,12 @@ where
 }
 
 #[async_trait]
-impl<K, P, C, U, Ctx, V> Backend for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Backend for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -245,8 +239,7 @@ where
     async fn get_client_key_share(&mut self) -> Result<PublicKey, BackendError> {
         let pk = self
             .ke
-            .client_key(&mut self.ctx)
-            .await
+            .client_key()
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
         Ok(PublicKey::new(
@@ -281,8 +274,7 @@ where
             *server_public_key = Some(key);
 
             self.ke
-                .set_server_key(&mut self.ctx, server_key)
-                .await
+                .set_server_key(server_key)
                 .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
             Ok(())
@@ -430,8 +422,7 @@ where
 
         let eq = self
             .ke
-            .compute_pms(&mut self.ctx, &mut self.vm)
-            .await
+            .compute_pms(&mut self.vm)
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
         eq.check()

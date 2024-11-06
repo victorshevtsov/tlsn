@@ -34,7 +34,6 @@ use tls_core::{
     },
     suites::SupportedCipherSuite,
 };
-use tlsn_universal_hash::UniversalHash;
 use tracing::{debug, Instrument};
 
 #[derive(Clone)]
@@ -49,13 +48,12 @@ impl MpcTlsLeaderCtrl {
     }
 }
 
-impl<K, P, C, U, Ctx, V> MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -83,13 +81,12 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Actor for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Actor for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -105,20 +102,19 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for MpcTlsLeaderMsg
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for MpcTlsLeaderMsg
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     async fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) {
         match self {
@@ -484,33 +480,31 @@ impl MpcTlsLeaderCtrl {
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetProtocolVersion
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetProtocolVersion
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetProtocolVersion> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetProtocolVersion> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -523,33 +517,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetCipherSuite
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetCipherSuite
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetCipherSuite> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetCipherSuite> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -562,33 +554,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgGetSuite
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetSuite
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetSuite> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgGetSuite> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -601,33 +591,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetEncrypt
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetEncrypt
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetEncrypt> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetEncrypt> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -640,33 +628,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetDecrypt
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetDecrypt
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetDecrypt> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetDecrypt> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -679,33 +665,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgGetClientRandom
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetClientRandom
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetClientRandom> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgGetClientRandom> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -718,33 +702,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgGetClientKeyShare
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetClientKeyShare
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetClientKeyShare> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgGetClientKeyShare> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -757,33 +739,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetServerRandom
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetServerRandom
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetServerRandom> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetServerRandom> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -796,33 +776,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetServerKeyShare
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetServerKeyShare
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetServerKeyShare> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetServerKeyShare> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -835,35 +813,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
-    for BackendMsgSetServerCertDetails
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetServerCertDetails
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetServerCertDetails>
-    for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetServerCertDetails> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -876,33 +850,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgSetServerKxDetails
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetServerKxDetails
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetServerKxDetails> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetServerKxDetails> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -915,35 +887,33 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>>
     for BackendMsgSetHsHashClientKeyExchange
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetHsHashClientKeyExchange>
-    for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetHsHashClientKeyExchange>
+    for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -956,35 +926,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
-    for BackendMsgSetHsHashServerHello
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetHsHashServerHello
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgSetHsHashServerHello>
-    for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgSetHsHashServerHello> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -997,34 +963,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
-    for BackendMsgGetServerFinishedVd
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetServerFinishedVd
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetServerFinishedVd> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgGetServerFinishedVd> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1037,34 +1000,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>>
-    for BackendMsgGetClientFinishedVd
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetClientFinishedVd
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetClientFinishedVd> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgGetClientFinishedVd> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1077,33 +1037,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgPrepareEncryption
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgPrepareEncryption
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgPrepareEncryption> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgPrepareEncryption> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1116,33 +1074,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgEncrypt
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgEncrypt
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgEncrypt> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgEncrypt> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1155,33 +1111,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgDecrypt
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgDecrypt
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgDecrypt> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgDecrypt> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1194,33 +1148,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgBufferIncoming
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgBufferIncoming
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgBufferIncoming> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgBufferIncoming> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1233,33 +1185,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgNextIncoming
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgNextIncoming
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgNextIncoming> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgNextIncoming> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1272,33 +1222,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgGetNotify
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetNotify
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgGetNotify> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgGetNotify> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1311,33 +1259,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgBufferLen
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgBufferLen
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgBufferLen> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgBufferLen> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1350,33 +1296,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for BackendMsgServerClosed
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgServerClosed
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<BackendMsgServerClosed> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<BackendMsgServerClosed> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1389,33 +1333,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for DeferDecryption
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for DeferDecryption
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<DeferDecryption> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<DeferDecryption> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1428,33 +1370,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for CloseConnection
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for CloseConnection
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<CloseConnection> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<CloseConnection> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
@@ -1467,33 +1407,31 @@ where
     }
 }
 
-impl<K, P, C, U, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, U, Ctx, V>> for Commit
+impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for Commit
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, U, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, U, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, U, Ctx, V> Handler<Commit> for MpcTlsLeader<K, P, C, U, Ctx, V>
+impl<K, P, C, Ctx, V> Handler<Commit> for MpcTlsLeader<K, P, C, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send,
     P: Prf<V> + Send,
     C: Send,
-    U: UniversalHash + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
 {

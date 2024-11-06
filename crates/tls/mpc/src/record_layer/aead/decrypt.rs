@@ -2,20 +2,23 @@
 
 use crate::{
     decode::{Decode, OneTimePadShared},
-    record_layer::aead::tag::{build_ghash_data, verify_tag, Tag},
+    record_layer::aead::ghash::{build_ghash_data, verify_tag, Tag},
     record_layer::aead::transmute,
     MpcTlsError, TlsRole,
 };
 use cipher::{CipherCircuit, Keystream};
 use mpz_circuits::types::ToBinaryRepr;
 use mpz_common::Context;
+use mpz_fields::gf2_128::Gf2_128;
 use mpz_memory_core::{
     binary::{Binary, U8},
     MemoryExt, Repr, StaticSize, Vector, View, ViewExt,
 };
+use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
 use mpz_vm_core::Vm;
-use tlsn_universal_hash::UniversalHash;
 use tracing::instrument;
+
+use super::ghash::Ghash;
 
 #[instrument(level = "trace", skip_all, err)]
 pub(crate) fn decrypt<V, C>(
@@ -83,14 +86,16 @@ pub(crate) struct PlainText {
 
 impl PlainText {
     #[instrument(level = "trace", skip_all, err)]
-    pub(crate) async fn compute<Ctx, U>(
+    pub(crate) async fn compute<Ctx, Sc>(
         self,
-        universal_hash: &mut U,
+        ghash: &mut Ghash<Sc>,
         ctx: &mut Ctx,
     ) -> Result<Vector<U8>, MpcTlsError>
     where
         Ctx: Context,
-        U: UniversalHash,
+        Sc: ShareConvert<Gf2_128>,
+        Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+        Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
     {
         let PlainText {
             role,
@@ -103,7 +108,7 @@ impl PlainText {
 
         let j0 = j0.decode().await?;
         let ciphertext = build_ghash_data(aad, ciphertext);
-        let hash = universal_hash.finalize(ciphertext, ctx).await?;
+        let hash = ghash.finalize(ciphertext)?;
 
         let tag_share = j0
             .into_iter()

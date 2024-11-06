@@ -1,7 +1,6 @@
 use hmac_sha256::PrfError;
 use key_exchange::KeyExchangeError;
 use mpz_memory_core::DecodeError;
-use tlsn_universal_hash::UniversalHashError;
 
 use crate::leader::state::StateError;
 use std::{error::Error, fmt::Display};
@@ -188,8 +187,8 @@ impl From<PrfError> for MpcTlsError {
     }
 }
 
-impl From<UniversalHashError> for MpcTlsError {
-    fn from(value: UniversalHashError) -> Self {
+impl From<crate::record_layer::aead::ghash::UniversalHashError> for MpcTlsError {
+    fn from(value: crate::record_layer::aead::ghash::UniversalHashError) -> Self {
         MpcTlsError::tag(value)
     }
 }

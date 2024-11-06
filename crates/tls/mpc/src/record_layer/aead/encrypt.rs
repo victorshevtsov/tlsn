@@ -3,7 +3,7 @@
 use crate::{
     decode::{Decode, OneTimePadShared},
     record_layer::aead::{
-        tag::{add_tag_shares, build_ghash_data, Tag},
+        ghash::{add_tag_shares, build_ghash_data, Ghash, Tag},
         transmute,
     },
     MpcTlsError, TlsRole,
@@ -11,12 +11,13 @@ use crate::{
 use cipher::CipherCircuit;
 use mpz_common::Context;
 use mpz_core::bitvec::BitVec;
+use mpz_fields::gf2_128::Gf2_128;
 use mpz_memory_core::{
     binary::{Binary, U8},
     DecodeFutureTyped, Memory, MemoryExt, Vector, View,
 };
+use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
 use mpz_vm_core::Vm;
-use tlsn_universal_hash::UniversalHash;
 use tracing::instrument;
 
 #[instrument(level = "trace", skip_all, err)]
@@ -54,22 +55,24 @@ pub(crate) struct TagCreator {
 
 impl TagCreator {
     #[instrument(level = "trace", skip_all, err)]
-    pub(crate) async fn compute<Ctx, U>(
+    pub(crate) async fn compute<Ctx, U, Sc>(
         self,
-        universal_hash: &mut U,
+        ghash: &mut Ghash<Sc>,
         ctx: &mut Ctx,
-    ) -> Result<(Vec<u8>, Vec<u8>), MpcTlsError>
+    ) -> Result<Vec<u8>, MpcTlsError>
     where
         Ctx: Context,
-        U: UniversalHash,
+        Sc: ShareConvert<Gf2_128>,
+        Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+        Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
     {
         let j0 = self.j0.decode().await?;
         let aad = self.aad;
 
-        let ciphertext = self.ciphertext.await?;
+        let mut ciphertext = self.ciphertext.await?;
 
-        let mut ciphertext_padded = build_ghash_data(aad, ciphertext);
-        let hash = universal_hash.finalize(ciphertext_padded, ctx).await?;
+        let ciphertext_padded = build_ghash_data(aad, ciphertext.clone());
+        let hash = ghash.finalize(ciphertext_padded)?;
 
         let tag_share = j0
             .into_iter()
@@ -79,7 +82,7 @@ impl TagCreator {
         let tag_share = Tag::new(tag_share);
 
         let tag = add_tag_shares(ctx, tag_share).await?;
-        let ciphertext = ciphertext.extend(&tag.into_inner());
+        ciphertext.extend(&tag.into_inner());
 
         Ok(ciphertext)
     }
