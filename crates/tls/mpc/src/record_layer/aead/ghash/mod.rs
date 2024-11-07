@@ -39,15 +39,13 @@ impl Tag {
         ctx: &mut Ctx,
         ghash: &GhashCompute,
         j0: Vec<u8>,
-        ciphertext: &Vec<u8>,
+        ciphertext: &[u8],
         aad: Vec<u8>,
     ) -> Result<Self, MpcTlsError>
     where
         Ctx: Context,
     {
-        let ciphertext = ciphertext;
-
-        let ciphertext_padded = build_ghash_data(aad, ciphertext.clone());
+        let ciphertext_padded = build_ghash_data(aad, ciphertext.to_vec());
         let hash = ghash.compute(ciphertext_padded)?;
 
         let tag_share = j0

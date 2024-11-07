@@ -16,9 +16,7 @@ use tls_core::{
 };
 
 pub(crate) mod aead;
-use aead::AesGcmEncrypt;
-
-use self::aead::{ghash::Tag, AesGcmDecrypt, Decrypt, DecryptPrivate, DecryptPublic, Encrypt};
+use aead::{AesGcmDecrypt, AesGcmEncrypt, Decrypt, DecryptPrivate, DecryptPublic, Encrypt};
 
 pub(crate) struct Encrypter {
     transcript: Transcript,
