@@ -109,18 +109,20 @@ impl<'a, F> Encrypt<'a, F> {
     /// # Arguments
     ///
     /// * `func` - The provided closure.
-    pub(crate) fn map_cipher<T, U>(self, func: T) -> impl TryFuture<Ok = U, Error = DecodeError>
+    pub(crate) fn map_cipher<T, U>(
+        self,
+        func: T,
+    ) -> Encrypt<'a, impl TryFuture<Ok = U, Error = MpcTlsError>>
     where
-        T: Fn(F::Ok) -> U,
+        T: FnOnce(F::Ok) -> U,
         F: TryFuture<Ok = Vec<u8>, Error = DecodeError>,
     {
         Encrypt {
             j0: self.j0,
             ghash: self.ghash,
-            ciphertext: self.ciphertext.map_ok(func),
+            ciphertext: self.ciphertext.map_ok(func).map_err(MpcTlsError::decode),
             aad: self.aad,
         }
-        .compute()
     }
 
     /// Computes the ciphertext.
@@ -132,6 +134,7 @@ impl<'a, F> Encrypt<'a, F> {
     pub(crate) async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Vec<u8>, MpcTlsError>
     where
         Ctx: Context,
+        F: TryFuture<Ok = Vec<u8>, Error = DecodeError>,
     {
         let j0 = self.j0.decode().map_err(MpcTlsError::decode);
         let aad = self.aad.to_vec();
@@ -185,12 +188,13 @@ impl AesGcmDecrypt {
 
         let cipher_out = keystream.apply(vm, cipher_ref).map_err(MpcTlsError::vm)?;
         let plaintext_ref = cipher_out
-            .assign(vm, explicit_nonce, START_COUNTER, ciphertext)
+            .assign(vm, explicit_nonce, START_COUNTER, ciphertext.clone())
             .map_err(MpcTlsError::vm)?;
 
         let decrypt = Decrypt {
             role: self.role,
             j0,
+            ciphertext,
             ghash: &self.ghash,
             plaintext_ref,
             aad,
@@ -204,6 +208,7 @@ impl AesGcmDecrypt {
 pub(crate) struct Decrypt<'a> {
     role: TlsRole,
     j0: OneTimePadShared,
+    ciphertext: Vec<u8>,
     ghash: &'a GhashCompute,
     plaintext_ref: Vector<U8>,
     aad: [u8; 13],
@@ -227,6 +232,7 @@ impl<'a> Decrypt<'a> {
         let decrypt = DecryptPrivate {
             role: self.role,
             j0: self.j0,
+            ciphertext: self.ciphertext,
             ghash: self.ghash,
             plaintext,
             aad: self.aad,
@@ -248,6 +254,7 @@ impl<'a> Decrypt<'a> {
         let decrypt = DecryptPublic {
             role: self.role,
             j0: self.j0,
+            ciphertext: self.ciphertext,
             ghash: self.ghash,
             plaintext,
             aad: self.aad,
@@ -262,6 +269,7 @@ pub(crate) struct DecryptPrivate<'a, F> {
     role: TlsRole,
     j0: OneTimePadShared,
     ghash: &'a GhashCompute,
+    ciphertext: Vec<u8>,
     plaintext: F,
     aad: [u8; 13],
     purported_tag: Vec<u8>,
@@ -269,21 +277,32 @@ pub(crate) struct DecryptPrivate<'a, F> {
 
 impl<'a, F> DecryptPrivate<'a, F>
 where
-    F: TryFuture<Ok = Vec<u8>, Error = DecodeError>,
+    F: TryFuture<Ok = Option<Vec<u8>>, Error = MpcTlsError>,
 {
     /// Transforms the inner plaintext future with a closure.
     ///
     /// # Arguments
     ///
     /// * `func` - The provided closure.
-    pub(crate) fn map_plain<T, U>(self, func: T) -> impl TryFuture<Ok = U, Error = DecodeError>
+    pub(crate) fn map_plain<T, U>(
+        self,
+        func: T,
+    ) -> DecryptPrivate<'a, impl TryFuture<Ok = U, Error = MpcTlsError>>
     where
-        T: Fn(F::Ok) -> U,
+        T: FnOnce(F::Ok) -> U,
     {
-        self.plaintext.map_ok(func)
+        DecryptPrivate {
+            role: self.role,
+            j0: self.j0,
+            ghash: self.ghash,
+            ciphertext: self.ciphertext,
+            plaintext: self.plaintext.map_ok(func),
+            aad: self.aad,
+            purported_tag: self.purported_tag,
+        }
     }
 
-    pub(crate) async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Vec<u8>, MpcTlsError>
+    pub(crate) async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Option<Vec<u8>>, MpcTlsError>
     where
         Ctx: Context,
     {
@@ -292,7 +311,7 @@ where
         let plaintext = self.plaintext.map_err(MpcTlsError::decode);
         let (j0, plaintext) = futures::try_join!(j0, plaintext)?;
 
-        let tag = Tag::compute(ctx, self.ghash, j0, &plaintext, aad).await?;
+        let tag = Tag::compute(ctx, self.ghash, j0, &self.ciphertext, aad).await?;
         tag.verify(ctx, self.role, self.purported_tag).await?;
 
         Ok(plaintext)
@@ -303,6 +322,7 @@ pub(crate) struct DecryptPublic<'a, F> {
     role: TlsRole,
     j0: OneTimePadShared,
     ghash: &'a GhashCompute,
+    ciphertext: Vec<u8>,
     plaintext: F,
     aad: [u8; 13],
     purported_tag: Vec<u8>,
@@ -317,11 +337,22 @@ where
     /// # Arguments
     ///
     /// * `func` - The provided closure.
-    pub(crate) fn map_plain<T, U>(self, func: T) -> impl TryFuture<Ok = U, Error = DecodeError>
+    pub(crate) fn map_plain<T, U>(
+        self,
+        func: T,
+    ) -> DecryptPublic<'a, impl TryFuture<Ok = U, Error = MpcTlsError>>
     where
-        T: Fn(F::Ok) -> U,
+        T: FnOnce(F::Ok) -> U,
     {
-        self.plaintext.map_ok(func)
+        DecryptPublic {
+            role: self.role,
+            j0: self.j0,
+            ghash: self.ghash,
+            ciphertext: self.ciphertext,
+            plaintext: self.plaintext.map_ok(func).map_err(MpcTlsError::decode),
+            aad: self.aad,
+            purported_tag: self.purported_tag,
+        }
     }
 
     pub(crate) async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Vec<u8>, MpcTlsError>
@@ -333,7 +364,7 @@ where
         let plaintext = self.plaintext.map_err(MpcTlsError::decode);
         let (j0, plaintext) = futures::try_join!(j0, plaintext)?;
 
-        let tag = Tag::compute(ctx, self.ghash, j0, &plaintext, aad).await?;
+        let tag = Tag::compute(ctx, self.ghash, j0, &self.ciphertext, aad).await?;
         tag.verify(ctx, self.role, self.purported_tag).await?;
 
         Ok(plaintext)

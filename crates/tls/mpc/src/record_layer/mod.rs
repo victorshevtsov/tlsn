@@ -1,7 +1,7 @@
 //! TLS record layer.
 
 use crate::{transcript::Transcript, MpcTlsError};
-use futures::TryFutureExt;
+use futures::{TryFuture, TryFutureExt};
 use mpz_memory_core::{
     binary::{Binary, U8},
     MemoryExt, Vector, View,
@@ -19,7 +19,7 @@ use tls_core::{
 pub(crate) mod aead;
 use aead::AesGcmEncrypt;
 
-use self::aead::{ghash::Tag, AesGcmDecrypt, Decrypt};
+use self::aead::{ghash::Tag, AesGcmDecrypt, Decrypt, DecryptPrivate, DecryptPublic, Encrypt};
 
 pub(crate) struct Encrypter {
     transcript: Transcript,
@@ -32,7 +32,7 @@ impl Encrypter {
         vm: &mut V,
         msg: PlainMessage,
         visibility: Vis,
-    ) -> Result<impl Future<Output = Result<OpaqueMessage, MpcTlsError>>, MpcTlsError>
+    ) -> Result<Encrypt<'_, impl TryFuture<Ok = OpaqueMessage, Error = MpcTlsError>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
         Vis: Fn(&mut V, Vector<U8>) -> Result<(), Err>,
@@ -59,18 +59,16 @@ impl Encrypter {
 
         self.transcript.record(typ, plaintext_ref);
 
-        let encrypt = encrypt
-            .map_cipher(move |ciphertext| {
-                let mut payload = explicit_nonce.to_vec();
-                payload.extend(ciphertext);
+        let encrypt = encrypt.map_cipher(move |ciphertext| {
+            let mut payload = explicit_nonce.to_vec();
+            payload.extend(ciphertext);
 
-                OpaqueMessage {
-                    typ,
-                    version,
-                    payload: Payload::new(payload),
-                }
-            })
-            .map_err(MpcTlsError::encrypt);
+            OpaqueMessage {
+                typ,
+                version,
+                payload: Payload::new(payload),
+            }
+        });
 
         Ok(encrypt)
     }
@@ -86,31 +84,52 @@ impl Decrypter {
         &mut self,
         vm: &mut V,
         msg: OpaqueMessage,
-    ) -> Result<impl Future<Output = Result<PlainMessage, MpcTlsError>>, MpcTlsError>
+    ) -> Result<
+        DecryptPrivate<'_, impl TryFuture<Ok = Option<PlainMessage>, Error = MpcTlsError>>,
+        MpcTlsError,
+    >
     where
         V: Vm<Binary> + View<Binary>,
     {
-        todo!()
+        let typ = msg.typ;
+        let version = msg.version;
+
+        let decrypt = self.decrypt(vm, msg)?;
+        let decrypt = decrypt.private(vm)?;
+
+        let decrypt = decrypt.map_plain(move |plaintext| {
+            plaintext.map(|p| PlainMessage {
+                typ,
+                version,
+                payload: Payload(p),
+            })
+        });
+
+        Ok(decrypt)
     }
 
     pub(crate) fn decrypt_public<V>(
         &mut self,
         vm: &mut V,
         msg: OpaqueMessage,
-    ) -> Result<impl Future<Output = Result<PlainMessage, MpcTlsError>>, MpcTlsError>
+    ) -> Result<
+        DecryptPublic<'_, impl TryFuture<Ok = PlainMessage, Error = MpcTlsError>>,
+        MpcTlsError,
+    >
     where
         V: Vm<Binary> + View<Binary>,
     {
+        let typ = msg.typ;
+        let version = msg.version;
+
         let decrypt = self.decrypt(vm, msg)?;
         let decrypt = decrypt.public(vm)?;
 
-        decrypt
-            .map_plain(|plaintext| PlainMessage {
-                typ: msg.typ,
-                version: msg.version,
-                payload: Payload::new(plaintext),
-            })
-            .map_err(MpcTlsError::encrypt);
+        let decrypt = decrypt.map_plain(move |plaintext| PlainMessage {
+            typ,
+            version,
+            payload: Payload::new(plaintext),
+        });
 
         Ok(decrypt)
     }
@@ -144,18 +163,6 @@ impl Decrypter {
 
         Ok(decrypt)
     }
-}
-
-pub(crate) async fn decrypt_private(msg: OpaqueMessage) -> Result<PlainMessage, MpcTlsError> {
-    todo!()
-}
-
-pub(crate) async fn decrypt_blind(msg: OpaqueMessage) -> Result<(), MpcTlsError> {
-    todo!()
-}
-
-pub(crate) async fn decrypt_public(msg: OpaqueMessage) -> Result<PlainMessage, MpcTlsError> {
-    todo!()
 }
 
 pub(crate) async fn decode_key_private() -> Result<(), MpcTlsError> {
