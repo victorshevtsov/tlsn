@@ -1,5 +1,7 @@
 //! Handles authenticated encryption, decryption and tags.
 
+use std::future::Future;
+
 use crate::{
     decode::{Decode, OneTimePadShared},
     MpcTlsError, TlsRole,
@@ -10,7 +12,7 @@ use mpz_common::Context;
 use mpz_core::bitvec::BitVec;
 use mpz_memory_core::{
     binary::{Binary, U8},
-    DecodeError, MemoryExt, StaticSize, Vector, View,
+    DecodeError, MemoryExt, StaticSize, Vector, View, ViewExt,
 };
 use mpz_memory_core::{DecodeFutureTyped, Memory};
 use mpz_memory_core::{FromRaw, Slice, ToRaw};
@@ -18,6 +20,7 @@ use mpz_vm_core::Vm;
 
 pub(crate) mod ghash;
 use ghash::{Ghash, GhashCompute, GhashConfig, GhashConfigBuilder, GhashConfigBuilderError, Tag};
+use tracing::instrument;
 
 const START_COUNTER: u32 = 2;
 
@@ -55,6 +58,7 @@ impl AesGcmEncrypt {
     /// * `plaintext` - The plaintext to encrypt.
     /// * `aad` - Additional data for AEAD.
     #[allow(clippy::type_complexity)]
+    #[instrument(level = "trace", skip_all, err)]
     pub(crate) fn encrypt<V>(
         &mut self,
         vm: &mut V,
@@ -62,13 +66,7 @@ impl AesGcmEncrypt {
         explicit_nonce: [u8; 8],
         plaintext: Vec<u8>,
         aad: [u8; 13],
-    ) -> Result<
-        (
-            Encrypt<'_, DecodeFutureTyped<BitVec<u32>, Vec<u8>>>,
-            Vector<U8>,
-        ),
-        MpcTlsError,
-    >
+    ) -> Result<Encrypt<'_, DecodeFutureTyped<BitVec<u32>, Vec<u8>>>, MpcTlsError>
     where
         V: Vm<Binary> + Memory<Binary> + View<Binary>,
     {
@@ -85,7 +83,7 @@ impl AesGcmEncrypt {
             .assign(vm, explicit_nonce, START_COUNTER, plaintext)
             .map_err(MpcTlsError::vm)?;
 
-        let ciphertext = vm.decode(cipher_ref).map_err(MpcTlsError::vm)?;
+        let ciphertext = vm.decode(cipher_ref).map_err(MpcTlsError::decode)?;
         let encrypt = Encrypt {
             j0,
             ghash: &self.ghash,
@@ -93,7 +91,7 @@ impl AesGcmEncrypt {
             aad,
         };
 
-        Ok((encrypt, cipher_ref))
+        Ok(encrypt)
     }
 }
 
@@ -105,10 +103,7 @@ pub(crate) struct Encrypt<'a, F> {
     aad: [u8; 13],
 }
 
-impl<'a, F> Encrypt<'a, F>
-where
-    F: TryFuture<Ok = Vec<u8>, Error = DecodeError>,
-{
+impl<'a, F> Encrypt<'a, F> {
     /// Transforms the inner ciphertext future with a closure.
     ///
     /// # Arguments
@@ -116,9 +111,16 @@ where
     /// * `func` - The provided closure.
     pub(crate) fn map_cipher<T, U>(self, func: T) -> impl TryFuture<Ok = U, Error = DecodeError>
     where
-        T: FnOnce(F::Ok) -> U,
+        T: Fn(F::Ok) -> U,
+        F: TryFuture<Ok = Vec<u8>, Error = DecodeError>,
     {
-        self.ciphertext.map_ok(func)
+        Encrypt {
+            j0: self.j0,
+            ghash: self.ghash,
+            ciphertext: self.ciphertext.map_ok(func),
+            aad: self.aad,
+        }
+        .compute()
     }
 
     /// Computes the ciphertext.
@@ -126,6 +128,7 @@ where
     /// # Arguments
     ///
     /// * `ctx` - The context for IO.
+    #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Vec<u8>, MpcTlsError>
     where
         Ctx: Context,
@@ -142,176 +145,200 @@ where
     }
 }
 
-//#[instrument(level = "trace", skip_all, err)]
-//pub(crate) fn prepare_tag_for_encrypt<V, C>(
-//    vm: &mut V,
-//    role: TlsRole,
-//    j0: <C as CipherCircuit>::Block,
-//    ciphertext: Vector<U8>,
-//    aad: Vec<u8>,
-//) -> Result<TagCreator, MpcTlsError>
-//where
-//    V: Vm<Binary> + Memory<Binary> + View<Binary>,
-//    C: CipherCircuit,
-//{
-//    let j0: Vector<U8> = transmute(j0);
-//    let j0 = Decode::new(vm, role, j0)?;
-//    let j0 = j0.shared(vm)?;
-//
-//    let ciphertext = vm.decode(ciphertext).map_err(MpcTlsError::vm)?;
-//
-//    let text = TagCreator {
-//        j0,
-//        ciphertext,
-//        aad,
-//    };
-//
-//    Ok(text)
-//}
-//
-//pub(crate) struct TagCreator {
-//    j0: OneTimePadShared,
-//    ciphertext: DecodeFutureTyped<BitVec<u32>, Vec<u8>>,
-//    aad: Vec<u8>,
-//}
-//
-//impl TagCreator {
-//    #[instrument(level = "trace", skip_all, err)]
-//    pub(crate) async fn compute<Ctx, U, Sc>(
-//        self,
-//        ghash: &mut Ghash<Sc>,
-//        ctx: &mut Ctx,
-//    ) -> Result<Vec<u8>, MpcTlsError>
-//    where
-//        Ctx: Context,
-//        Sc: ShareConvert<Gf2_128>,
-//        Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
-//        Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
-//    {
-//        let j0 = self.j0.decode().await?;
-//        let aad = self.aad;
-//
-//        let mut ciphertext = self.ciphertext.await?;
-//
-//        let ciphertext_padded = build_ghash_data(aad, ciphertext.clone());
-//        let hash = ghash.finalize(ciphertext_padded)?;
-//
-//        let tag_share = j0
-//            .into_iter()
-//            .zip(hash.into_iter())
-//            .map(|(a, b)| a ^ b)
-//            .collect();
-//        let tag_share = Tag::new(tag_share);
-//
-//        let tag = add_tag_shares(ctx, tag_share).await?;
-//        ciphertext.extend(&tag.into_inner());
-//
-//        Ok(ciphertext)
-//    }
-//}
-//
-//#[instrument(level = "trace", skip_all, err)]
-//pub(crate) fn decrypt<V, C>(
-//    vm: &mut V,
-//    role: TlsRole,
-//    keystream: &mut Keystream<C>,
-//    explicit_nonce: <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear,
-//    start_counter: u32,
-//    mut ciphertext: Vec<u8>,
-//    aad: Vec<u8>,
-//) -> Result<PlainText, MpcTlsError>
-//where
-//    V: Vm<Binary> + View<Binary>,
-//    C: CipherCircuit,
-//    <<C as CipherCircuit>::Counter as Repr<Binary>>::Clear: From<[u8; 4]>,
-//    <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear: Copy,
-//{
-//    let tag_bytes = ciphertext
-//        .split_off(ciphertext.len() - <<C as CipherCircuit>::Block as StaticSize<Binary>>::SIZE);
-//    let purported_tag = Tag::new(tag_bytes);
-//
-//    let len = ciphertext.len();
-//    let block_size = <<C as CipherCircuit>::Block as StaticSize<Binary>>::SIZE / 8;
-//    let block_count = (len / block_size) + (len % block_size != 0) as usize;
-//
-//    let j0 = keystream
-//        .j0(vm, explicit_nonce)
-//        .map_err(MpcTlsError::decrypt)?;
-//    let j0: Vector<U8> = transmute(j0);
-//    let j0 = Decode::new(vm, role, j0)?;
-//    let j0 = j0.shared(vm)?;
-//
-//    let keystream = keystream.chunk(block_count).map_err(MpcTlsError::decrypt)?;
-//    let cipher_ref = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
-//    vm.mark_public(cipher_ref).map_err(MpcTlsError::vm)?;
-//
-//    let cipher_output = keystream
-//        .apply(vm, cipher_ref)
-//        .map_err(MpcTlsError::decrypt)?;
-//
-//    let plaintext = cipher_output
-//        .assign(vm, explicit_nonce, start_counter, ciphertext.clone())
-//        .map_err(MpcTlsError::decrypt)?;
-//
-//    let plaintext = PlainText {
-//        role,
-//        j0,
-//        ciphertext,
-//        purported_tag,
-//        plaintext,
-//        aad,
-//    };
-//
-//    Ok(plaintext)
-//}
-//
-//pub(crate) struct PlainText {
-//    role: TlsRole,
-//    j0: OneTimePadShared,
-//    ciphertext: Vec<u8>,
-//    purported_tag: Tag,
-//    plaintext: Vector<U8>,
-//    aad: Vec<u8>,
-//}
-//
-//impl PlainText {
-//    #[instrument(level = "trace", skip_all, err)]
-//    pub(crate) async fn compute<Ctx, Sc>(
-//        self,
-//        ghash: &mut Ghash<Sc>,
-//        ctx: &mut Ctx,
-//    ) -> Result<Vector<U8>, MpcTlsError>
-//    where
-//        Ctx: Context,
-//        Sc: ShareConvert<Gf2_128>,
-//        Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
-//        Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
-//    {
-//        let PlainText {
-//            role,
-//            j0,
-//            ciphertext,
-//            purported_tag,
-//            plaintext,
-//            aad,
-//        } = self;
-//
-//        let j0 = j0.decode().await?;
-//        let ciphertext = build_ghash_data(aad, ciphertext);
-//        let hash = ghash.finalize(ciphertext)?;
-//
-//        let tag_share = j0
-//            .into_iter()
-//            .zip(hash.into_iter())
-//            .map(|(a, b)| a ^ b)
-//            .collect();
-//        let tag_share = Tag::new(tag_share);
-//
-//        verify_tag(ctx, role, tag_share, purported_tag).await?;
-//
-//        Ok(plaintext)
-//    }
-//}
+pub(crate) struct AesGcmDecrypt {
+    role: TlsRole,
+    keystream: Keystream<Aes128>,
+    ghash: GhashCompute,
+}
+
+impl AesGcmDecrypt {
+    /// Preparation for decrypting a ciphertext.
+    ///
+    /// Returns [`Decrypt`] for async computation.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - A virtual machine for 2PC.
+    /// * `explicit_nonce` - The TLS explicit nonce.
+    /// * `ciphertext` - The ciphertext to decrypt.
+    /// * `aad` - Additional data for AEAD.
+    /// * `purported_tag` - The MAC from the server.
+    #[instrument(level = "trace", skip_all, err)]
+    pub(crate) fn decrypt<V>(
+        &mut self,
+        vm: &mut V,
+        explicit_nonce: [u8; 8],
+        ciphertext: Vec<u8>,
+        aad: [u8; 13],
+        purported_tag: Vec<u8>,
+    ) -> Result<(Decrypt<'_>, Vector<U8>), MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        let j0 = self.keystream.j0(vm, explicit_nonce)?;
+        let j0 = Decode::new(vm, self.role, transmute(j0))?;
+        let j0 = j0.shared(vm)?;
+
+        let keystream = self.keystream.chunk_sufficient(ciphertext.len())?;
+        let cipher_ref: Vector<U8> = vm.alloc_vec(ciphertext.len()).map_err(MpcTlsError::vm)?;
+        vm.mark_public(cipher_ref).map_err(MpcTlsError::vm)?;
+
+        let cipher_out = keystream.apply(vm, cipher_ref).map_err(MpcTlsError::vm)?;
+        let plaintext_ref = cipher_out
+            .assign(vm, explicit_nonce, START_COUNTER, ciphertext)
+            .map_err(MpcTlsError::vm)?;
+
+        let decrypt = Decrypt {
+            role: self.role,
+            j0,
+            ghash: &self.ghash,
+            plaintext_ref,
+            aad,
+            purported_tag,
+        };
+
+        Ok((decrypt, plaintext_ref))
+    }
+}
+
+pub(crate) struct Decrypt<'a> {
+    role: TlsRole,
+    j0: OneTimePadShared,
+    ghash: &'a GhashCompute,
+    plaintext_ref: Vector<U8>,
+    aad: [u8; 13],
+    purported_tag: Vec<u8>,
+}
+
+impl<'a> Decrypt<'a> {
+    pub(crate) fn private<V>(
+        self,
+        vm: &mut V,
+    ) -> Result<
+        DecryptPrivate<'a, impl Future<Output = Result<Option<Vec<u8>>, MpcTlsError>>>,
+        MpcTlsError,
+    >
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        let otp = Decode::new(vm, self.role, self.plaintext_ref)?;
+        let plaintext = otp.private(vm)?.decode();
+
+        let decrypt = DecryptPrivate {
+            role: self.role,
+            j0: self.j0,
+            ghash: self.ghash,
+            plaintext,
+            aad: self.aad,
+            purported_tag: self.purported_tag,
+        };
+
+        Ok(decrypt)
+    }
+
+    pub(crate) fn public<V>(
+        self,
+        vm: &mut V,
+    ) -> Result<DecryptPublic<'a, impl Future<Output = Result<Vec<u8>, DecodeError>>>, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        let plaintext = vm.decode(self.plaintext_ref).map_err(MpcTlsError::decode)?;
+
+        let decrypt = DecryptPublic {
+            role: self.role,
+            j0: self.j0,
+            ghash: self.ghash,
+            plaintext,
+            aad: self.aad,
+            purported_tag: self.purported_tag,
+        };
+
+        Ok(decrypt)
+    }
+}
+
+pub(crate) struct DecryptPrivate<'a, F> {
+    role: TlsRole,
+    j0: OneTimePadShared,
+    ghash: &'a GhashCompute,
+    plaintext: F,
+    aad: [u8; 13],
+    purported_tag: Vec<u8>,
+}
+
+impl<'a, F> DecryptPrivate<'a, F>
+where
+    F: TryFuture<Ok = Vec<u8>, Error = DecodeError>,
+{
+    /// Transforms the inner plaintext future with a closure.
+    ///
+    /// # Arguments
+    ///
+    /// * `func` - The provided closure.
+    pub(crate) fn map_plain<T, U>(self, func: T) -> impl TryFuture<Ok = U, Error = DecodeError>
+    where
+        T: Fn(F::Ok) -> U,
+    {
+        self.plaintext.map_ok(func)
+    }
+
+    pub(crate) async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Vec<u8>, MpcTlsError>
+    where
+        Ctx: Context,
+    {
+        let j0 = self.j0.decode().map_err(MpcTlsError::decode);
+        let aad = self.aad.to_vec();
+        let plaintext = self.plaintext.map_err(MpcTlsError::decode);
+        let (j0, plaintext) = futures::try_join!(j0, plaintext)?;
+
+        let tag = Tag::compute(ctx, self.ghash, j0, &plaintext, aad).await?;
+        tag.verify(ctx, self.role, self.purported_tag).await?;
+
+        Ok(plaintext)
+    }
+}
+
+pub(crate) struct DecryptPublic<'a, F> {
+    role: TlsRole,
+    j0: OneTimePadShared,
+    ghash: &'a GhashCompute,
+    plaintext: F,
+    aad: [u8; 13],
+    purported_tag: Vec<u8>,
+}
+
+impl<'a, F> DecryptPublic<'a, F>
+where
+    F: TryFuture<Ok = Vec<u8>, Error = DecodeError>,
+{
+    /// Transforms the inner plaintext future with a closure.
+    ///
+    /// # Arguments
+    ///
+    /// * `func` - The provided closure.
+    pub(crate) fn map_plain<T, U>(self, func: T) -> impl TryFuture<Ok = U, Error = DecodeError>
+    where
+        T: Fn(F::Ok) -> U,
+    {
+        self.plaintext.map_ok(func)
+    }
+
+    pub(crate) async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Vec<u8>, MpcTlsError>
+    where
+        Ctx: Context,
+    {
+        let j0 = self.j0.decode().map_err(MpcTlsError::decode);
+        let aad = self.aad.to_vec();
+        let plaintext = self.plaintext.map_err(MpcTlsError::decode);
+        let (j0, plaintext) = futures::try_join!(j0, plaintext)?;
+
+        let tag = Tag::compute(ctx, self.ghash, j0, &plaintext, aad).await?;
+        tag.verify(ctx, self.role, self.purported_tag).await?;
+
+        Ok(plaintext)
+    }
+}
 
 fn transmute<T>(value: T) -> Vector<U8>
 where

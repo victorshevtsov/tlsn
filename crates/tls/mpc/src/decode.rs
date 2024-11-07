@@ -4,11 +4,11 @@ use crate::{MpcTlsError, TlsRole};
 use mpz_circuits::{types::ValueType, Circuit, CircuitBuilder, Tracer};
 use mpz_core::bitvec::BitVec;
 use mpz_memory_core::{
-    binary::{Binary, U8}, DecodeFutureTyped, MemoryExt, StaticSize, Vector, View,
-    ViewExt,
+    binary::{Binary, U8},
+    DecodeFutureTyped, MemoryExt, Vector, View, ViewExt,
 };
 use mpz_vm_core::{CallBuilder, Vm, VmExt};
-use rand::{prelude::Distribution, thread_rng, RngCore};
+use rand::{thread_rng, RngCore};
 
 pub(crate) struct Decode {
     role: TlsRole,
@@ -23,7 +23,7 @@ impl Decode {
     where
         V: Vm<Binary> + View<Binary>,
     {
-        let len = value.len() * U8::SIZE;
+        let len = value.len();
         let otp_0: Vector<U8> = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
         let otp_1: Vector<U8> = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
         let decode = Self {

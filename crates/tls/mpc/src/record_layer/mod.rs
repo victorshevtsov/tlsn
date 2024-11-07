@@ -19,6 +19,8 @@ use tls_core::{
 pub(crate) mod aead;
 use aead::AesGcmEncrypt;
 
+use self::aead::{ghash::Tag, AesGcmDecrypt, Decrypt};
+
 pub(crate) struct Encrypter {
     transcript: Transcript,
     aes: AesGcmEncrypt,
@@ -33,7 +35,7 @@ impl Encrypter {
     ) -> Result<impl Future<Output = Result<OpaqueMessage, MpcTlsError>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
-        Vis: FnOnce(&mut V, Vector<U8>) -> Result<(), Err>,
+        Vis: Fn(&mut V, Vector<U8>) -> Result<(), Err>,
         Err: std::error::Error + Send + Sync + 'static,
     {
         let PlainMessage {
@@ -51,11 +53,11 @@ impl Encrypter {
         let plaintext_ref: Vector<U8> = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
         visibility(vm, plaintext_ref).map_err(MpcTlsError::vm)?;
 
-        let (encrypt, cipher_ref) =
-            self.aes
-                .encrypt(vm, plaintext_ref, explicit_nonce, plaintext, aad)?;
+        let encrypt = self
+            .aes
+            .encrypt(vm, plaintext_ref, explicit_nonce, plaintext, aad)?;
 
-        self.transcript.record(typ, cipher_ref);
+        self.transcript.record(typ, plaintext_ref);
 
         let encrypt = encrypt
             .map_cipher(move |ciphertext| {
@@ -68,9 +70,79 @@ impl Encrypter {
                     payload: Payload::new(payload),
                 }
             })
-            .map_err(MpcTlsError::decode);
+            .map_err(MpcTlsError::encrypt);
 
         Ok(encrypt)
+    }
+}
+
+pub(crate) struct Decrypter {
+    transcript: Transcript,
+    aes: AesGcmDecrypt,
+}
+
+impl Decrypter {
+    pub(crate) fn decrypt_private<V>(
+        &mut self,
+        vm: &mut V,
+        msg: OpaqueMessage,
+    ) -> Result<impl Future<Output = Result<PlainMessage, MpcTlsError>>, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        todo!()
+    }
+
+    pub(crate) fn decrypt_public<V>(
+        &mut self,
+        vm: &mut V,
+        msg: OpaqueMessage,
+    ) -> Result<impl Future<Output = Result<PlainMessage, MpcTlsError>>, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        let decrypt = self.decrypt(vm, msg)?;
+        let decrypt = decrypt.public(vm)?;
+
+        decrypt
+            .map_plain(|plaintext| PlainMessage {
+                typ: msg.typ,
+                version: msg.version,
+                payload: Payload::new(plaintext),
+            })
+            .map_err(MpcTlsError::encrypt);
+
+        Ok(decrypt)
+    }
+
+    fn decrypt<V>(&mut self, vm: &mut V, msg: OpaqueMessage) -> Result<Decrypt<'_>, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        let OpaqueMessage {
+            typ,
+            version,
+            payload,
+        } = msg;
+        let mut ciphertext = payload.0;
+
+        let seq = self.transcript.seq();
+        let explicit_nonce: [u8; 8] = ciphertext
+            .drain(..8)
+            .collect::<Vec<u8>>()
+            .try_into()
+            .expect("Should be able to drain explicit nonce");
+        let purported_tag = ciphertext.split_off(ciphertext.len() - 16);
+        let len = ciphertext.len();
+        let aad = make_tls12_aad(seq, typ, version, len);
+
+        let (decrypt, plaintext_ref) =
+            self.aes
+                .decrypt(vm, explicit_nonce, ciphertext, aad, purported_tag)?;
+
+        self.transcript.record(typ, plaintext_ref);
+
+        Ok(decrypt)
     }
 }
 
