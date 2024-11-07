@@ -1,7 +1,8 @@
 //! TLS record layer.
 
+use std::future::Future;
+
 use crate::{transcript::Transcript, MpcTlsError};
-use futures::TryFuture;
 use mpz_memory_core::{
     binary::{Binary, U8},
     MemoryExt, Vector, View, ViewExt,
@@ -28,7 +29,7 @@ impl Encrypter {
         &mut self,
         vm: &mut V,
         msg: PlainMessage,
-    ) -> Result<Encrypt<'_, impl TryFuture<Ok = OpaqueMessage, Error = MpcTlsError>>, MpcTlsError>
+    ) -> Result<Encrypt<'_, impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
@@ -39,7 +40,7 @@ impl Encrypter {
         &mut self,
         vm: &mut V,
         msg: PlainMessage,
-    ) -> Result<Encrypt<'_, impl TryFuture<Ok = OpaqueMessage, Error = MpcTlsError>>, MpcTlsError>
+    ) -> Result<Encrypt<'_, impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
@@ -51,7 +52,7 @@ impl Encrypter {
         vm: &mut V,
         msg: PlainMessage,
         visibility: Vis,
-    ) -> Result<Encrypt<'_, impl TryFuture<Ok = OpaqueMessage, Error = MpcTlsError>>, MpcTlsError>
+    ) -> Result<Encrypt<'_, impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
         Vis: Fn(&mut V, Vector<U8>) -> Result<(), Err>,
@@ -104,7 +105,7 @@ impl Decrypter {
         vm: &mut V,
         msg: OpaqueMessage,
     ) -> Result<
-        DecryptPrivate<'_, impl TryFuture<Ok = Option<PlainMessage>, Error = MpcTlsError>>,
+        DecryptPrivate<'_, impl Future<Output = Result<Option<PlainMessage>, MpcTlsError>>>,
         MpcTlsError,
     >
     where
@@ -132,7 +133,7 @@ impl Decrypter {
         vm: &mut V,
         msg: OpaqueMessage,
     ) -> Result<
-        DecryptPublic<'_, impl TryFuture<Ok = PlainMessage, Error = MpcTlsError>>,
+        DecryptPublic<'_, impl Future<Output = Result<PlainMessage, MpcTlsError>>>,
         MpcTlsError,
     >
     where
