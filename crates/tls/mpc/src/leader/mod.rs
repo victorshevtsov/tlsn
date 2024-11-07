@@ -1,10 +1,14 @@
 use crate::{
     error::MpcTlsError,
-    msg::{ClientFinishedVd, CommitMessage, ComputeKeyExchange, MpcTlsMessage, ServerFinishedVd},
+    msg::{
+        ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, MpcTlsMessage,
+        ServerFinishedVd,
+    },
     transcript::Transcript,
     Direction, MpcTlsChannel, MpcTlsLeaderConfig,
 };
 use async_trait::async_trait;
+use cipher::{aes::Aes128, Cipher, CipherCircuit};
 use futures::{SinkExt, TryFutureExt};
 use hmac_sha256::{Prf, PrfOutput};
 use ke::KeyExchange;
@@ -29,7 +33,7 @@ use tls_core::{
     },
     suites::SupportedCipherSuite,
 };
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace};
 
 mod actor;
 use actor::MpcTlsLeaderCtrl;
@@ -103,8 +107,56 @@ where
 
     /// Performs any one-time setup operations.
     #[instrument(level = "debug", skip_all, err)]
-    pub async fn setup(&mut self) -> Result<(), MpcTlsError> {
-        todo!()
+    pub async fn setup(&mut self) -> Result<(), MpcTlsError>
+    where
+        C: Cipher<Aes128, V>,
+    {
+        let pms = self.ke.setup(&mut self.vm)?.into_value();
+        let prf_out = self.prf.setup(&mut self.vm, pms)?;
+
+        self.cipher.set_key(prf_out.keys.client_write_key);
+        self.cipher.set_iv(prf_out.keys.client_iv);
+
+        let traffic_size = self.config.common().tx_config().max_online_size();
+        let keystream_encrypt = self
+            .cipher
+            .alloc(&mut self.vm, traffic_size)
+            .map_err(MpcTlsError::cipher)?;
+
+        let traffic_size_mpc = self.config.common().rx_config().max_online_size();
+        /// For this to work, we need to convert the mpc vm to zk vm at some point.
+        let traffic_size_zk = self.config.common().rx_config().max_offline_size();
+        let keystream_decrypt = self
+            .cipher
+            .alloc(&mut self.vm, traffic_size_mpc + traffic_size_zk)
+            .map_err(MpcTlsError::cipher)?;
+
+        //TODO: Continue here
+        futures::try_join!(self.encrypter.setup(), self.decrypter.setup())?;
+
+        futures::try_join!(
+            self.encrypter
+                .set_key(session_keys.client_write_key, session_keys.client_iv),
+            self.decrypter
+                .set_key(session_keys.server_write_key, session_keys.server_iv)
+        )?;
+
+        self.ke.preprocess().await?;
+        self.prf.preprocess().await?;
+
+        let preprocess_encrypt = self.config.common().tx_config().max_online_size();
+        let preprocess_decrypt = self.config.common().rx_config().max_online_size();
+
+        futures::try_join!(
+            self.encrypter.preprocess(preprocess_encrypt),
+            self.decrypter.preprocess(preprocess_decrypt),
+        )?;
+
+        self.prf
+            .set_client_random(Some(self.state.try_as_ke()?.client_random.0))
+            .await?;
+
+        Ok(())
     }
 
     /// Returns the number of bytes sent and received.
@@ -160,7 +212,25 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     async fn commit(&mut self) -> Result<(), MpcTlsError> {
-        todo!()
+        if self.committed {
+            return Ok(());
+        }
+        self.state.try_as_active()?;
+
+        debug!("committing to transcript");
+
+        self.channel.send(MpcTlsMessage::Commit(Commit)).await?;
+
+        self.committed = true;
+
+        if !self.buffer.is_empty() {
+            // TODO
+            // self.decrypter.decode_key_private().await?;
+            self.is_decrypting = true;
+            self.notifier.set();
+        }
+
+        Ok(())
     }
 
     /// Closes the connection.
