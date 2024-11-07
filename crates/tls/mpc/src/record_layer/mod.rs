@@ -1,13 +1,12 @@
 //! TLS record layer.
 
 use crate::{transcript::Transcript, MpcTlsError};
-use futures::{TryFuture, TryFutureExt};
+use futures::TryFuture;
 use mpz_memory_core::{
     binary::{Binary, U8},
-    MemoryExt, Vector, View,
+    MemoryExt, Vector, View, ViewExt,
 };
 use mpz_vm_core::Vm;
-use std::future::Future;
 use tls_core::{
     cipher::make_tls12_aad,
     msgs::{
@@ -27,7 +26,29 @@ pub(crate) struct Encrypter {
 }
 
 impl Encrypter {
-    pub(crate) fn encrypt<V, Vis, Err>(
+    pub(crate) fn encrypt_private<V>(
+        &mut self,
+        vm: &mut V,
+        msg: PlainMessage,
+    ) -> Result<Encrypt<'_, impl TryFuture<Ok = OpaqueMessage, Error = MpcTlsError>>, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        self.encrypt(vm, msg, ViewExt::mark_private)
+    }
+
+    pub(crate) fn encrypt_public<V>(
+        &mut self,
+        vm: &mut V,
+        msg: PlainMessage,
+    ) -> Result<Encrypt<'_, impl TryFuture<Ok = OpaqueMessage, Error = MpcTlsError>>, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        self.encrypt(vm, msg, ViewExt::mark_public)
+    }
+
+    fn encrypt<V, Vis, Err>(
         &mut self,
         vm: &mut V,
         msg: PlainMessage,
