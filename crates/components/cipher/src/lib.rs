@@ -9,10 +9,8 @@
 
 pub mod aes;
 mod circuit;
-pub mod config;
 
 pub use circuit::CipherCircuit;
-pub use config::CipherConfig;
 
 use async_trait::async_trait;
 use circuit::build_xor_circuit;

@@ -2,7 +2,7 @@
 //!
 //! [`MpcAes`] implements [`crate::Cipher`] for AES-128 using [`Aes128`].
 
-use crate::{circuit::CipherCircuit, config::CipherConfig, Cipher, Keystream};
+use crate::{circuit::CipherCircuit, Cipher, Keystream};
 use async_trait::async_trait;
 use mpz_memory_core::{binary::Binary, MemoryExt, Repr, StaticSize, View, ViewExt};
 use mpz_vm_core::{CallBuilder, Vm, VmExt};
@@ -15,8 +15,8 @@ pub use circuit::Aes128;
 use error::{AesError, ErrorKind};
 
 /// Computes AES-128.
+#[derive(Default)]
 pub struct MpcAes {
-    config: CipherConfig,
     key: Option<<Aes128 as CipherCircuit>::Key>,
     iv: Option<<Aes128 as CipherCircuit>::Iv>,
 }
@@ -24,7 +24,6 @@ pub struct MpcAes {
 impl Debug for MpcAes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MpcAes")
-            .field("config", &self.config)
             .field("key", &"{{...}}")
             .field("iv", &"{{...}}")
             .finish()
@@ -32,15 +31,6 @@ impl Debug for MpcAes {
 }
 
 impl MpcAes {
-    /// Creates a new instance.
-    pub fn new(config: CipherConfig) -> Self {
-        Self {
-            config,
-            key: None,
-            iv: None,
-        }
-    }
-
     /// Returns the key reference.
     pub fn key(&self) -> Result<<Aes128 as CipherCircuit>::Key, AesError> {
         self.key
@@ -154,7 +144,7 @@ where
 mod tests {
     use crate::{
         aes::{Aes128, MpcAes},
-        Cipher, CipherConfig,
+        Cipher,
     };
     use mpz_common::{
         executor::{test_st_executor, TestSTExecutor},
@@ -166,7 +156,7 @@ mod tests {
         correlated::Delta,
         Array, Memory, MemoryExt, Vector, View, ViewExt,
     };
-    use mpz_ot::ideal::cot::ideal_cot_with_delta;
+    use mpz_ot::ideal::cot::ideal_cot;
     use mpz_vm_core::{Execute, Vm};
     use rand::{rngs::StdRng, SeedableRng};
 
@@ -280,12 +270,12 @@ mod tests {
         impl Vm<Binary> + View<Binary> + Execute<Ctx>,
     )
     where
-        Ctx: Context,
+        Ctx: Context + 'static,
     {
         let mut rng = StdRng::seed_from_u64(0);
         let delta = Delta::random(&mut rng);
 
-        let (cot_send, cot_recv) = ideal_cot_with_delta(delta.into_inner());
+        let (cot_send, cot_recv) = ideal_cot(delta.into_inner());
 
         let gen = Generator::new(cot_send, [0u8; 16], delta);
         let ev = Evaluator::new(cot_recv);
@@ -308,9 +298,7 @@ mod tests {
         vm.assign(iv_ref, iv).unwrap();
         vm.commit(iv_ref).unwrap();
 
-        let config = CipherConfig::builder().id("test").build().unwrap();
-
-        let mut aes = MpcAes::new(config);
+        let mut aes = MpcAes::default();
 
         Cipher::<Aes128, V>::set_key(&mut aes, key_ref);
         Cipher::<Aes128, V>::set_iv(&mut aes, iv_ref);
@@ -328,8 +316,7 @@ mod tests {
         vm.assign(key_ref, key).unwrap();
         vm.commit(key_ref).unwrap();
 
-        let config = CipherConfig::builder().id("test").build().unwrap();
-        let mut aes = MpcAes::new(config);
+        let mut aes = MpcAes::default();
         Cipher::<Aes128, V>::set_key(&mut aes, key_ref);
 
         aes

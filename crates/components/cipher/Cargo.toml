@@ -17,7 +17,6 @@ mpz-vm-core = { workspace = true }
 mpz-memory-core = { workspace = true }
 
 async-trait = { workspace = true }
-derive_builder = { workspace = true }
 thiserror = { workspace = true }
 aes = { workspace = true }
 
