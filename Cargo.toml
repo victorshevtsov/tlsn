@@ -64,17 +64,17 @@ tlsn-utils = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "0040a00" 
 tlsn-utils-aio = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "0040a00" }
 tlsn-verifier = { path = "crates/verifier" }
 
-mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-memory-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-vm-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-garble-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-ole = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
-mpz-fields = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "feat/garble-vm" }
+mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-memory-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-vm-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-garble-core = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-ole = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
+mpz-fields = { git = "https://github.com/privacy-scaling-explorations/mpz", branch = "alpha.1" }
 
 serio = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "43995c5" }
 spansy = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "0040a00" }
