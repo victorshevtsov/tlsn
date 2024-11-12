@@ -25,6 +25,13 @@ pub(crate) struct Encrypter {
 }
 
 impl Encrypter {
+    pub(crate) fn new(aes: AesGcmEncrypt) -> Self {
+        Self {
+            transcript: Transcript::default(),
+            aes,
+        }
+    }
+
     pub(crate) fn encrypt_private<V>(
         &mut self,
         vm: &mut V,
@@ -100,6 +107,13 @@ pub(crate) struct Decrypter {
 }
 
 impl Decrypter {
+    pub(crate) fn new(aes: AesGcmDecrypt) -> Self {
+        Self {
+            transcript: Transcript::default(),
+            aes,
+        }
+    }
+
     pub(crate) fn decrypt_private<V>(
         &mut self,
         vm: &mut V,

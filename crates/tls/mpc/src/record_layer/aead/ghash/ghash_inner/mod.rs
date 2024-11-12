@@ -21,7 +21,6 @@ enum State {
     SetKey { key: Gf2_128 },
     MultKey { key: Gf2_128 },
     Ready { core: GhashCore<Finalized> },
-    Done,
     Error,
 }
 
@@ -99,21 +98,48 @@ where
         Ok(())
     }
 
-    /// Returns [`GhashCompute`] which can be used to compute ghash.
+    /// Computes ghash of the input, padding the input to the block size
+    /// if needed.
     ///
-    /// When [`Ghash`] has been set up and is in [State::Ready], this functions returns a compute
-    /// instance to compute ghash.
-    pub(crate) fn finalize(&mut self) -> Result<GhashCompute, UniversalHashError> {
-        let State::Ready { core } = std::mem::replace(&mut self.state, State::Error) else {
+    /// # Arguments
+    ///
+    /// * `input` - Input to hash.
+    pub(crate) fn finalize(&self, mut input: Vec<u8>) -> Result<Vec<u8>, UniversalHashError> {
+        let State::Ready { ref core } = self.state else {
             return Err(UniversalHashError::state(
                 "Finalize can only be called when in Ready state",
             ));
         };
 
-        self.state = State::Done;
-        let ghash = GhashCompute { core };
+        // Divide by block length and round up.
+        let block_count = input.len() / 16 + (input.len() % 16 != 0) as usize;
 
-        Ok(ghash)
+        if block_count > core.max_block_count() {
+            return Err(UniversalHashError::input(format!(
+                "block length of input should be {} max, but is {}",
+                core.max_block_count(),
+                block_count
+            )));
+        }
+
+        // Pad input to a multiple of 16 bytes.
+        input.resize(block_count * 16, 0);
+
+        // Convert input to blocks.
+        let blocks = input
+            .chunks_exact(16)
+            .map(|chunk| {
+                let mut block = [0u8; 16];
+                block.copy_from_slice(chunk);
+                Block::from(block)
+            })
+            .collect::<Vec<Block>>();
+
+        let tag = core
+            .finalize(&blocks)
+            .expect("Input length should be valid");
+
+        Ok(tag.to_bytes().to_vec())
     }
 
     /// Converts the additive key share into a multiplicative share.
@@ -160,55 +186,6 @@ where
             .map_err(UniversalHashError::flush)?;
 
         Ok((add_keys, core))
-    }
-}
-
-/// Computes ghash.
-///
-/// Once [`Ghash`] has been finalized with [`Ghash::finalize`] it returns [`GhashCompute`]
-/// which can be used to compute ghash for data.
-pub(crate) struct GhashCompute {
-    core: GhashCore<Finalized>,
-}
-
-impl GhashCompute {
-    /// Computes hash of the input, padding the input to the block size
-    /// if needed.
-    ///
-    /// # Arguments
-    ///
-    /// * `input` - Input to hash.
-    pub(crate) fn compute(&self, mut input: Vec<u8>) -> Result<Vec<u8>, UniversalHashError> {
-        // Divide by block length and round up.
-        let block_count = input.len() / 16 + (input.len() % 16 != 0) as usize;
-
-        if block_count > self.core.max_block_count() {
-            return Err(UniversalHashError::input(format!(
-                "block length of input should be {} max, but is {}",
-                self.core.max_block_count(),
-                block_count
-            )));
-        }
-
-        // Pad input to a multiple of 16 bytes.
-        input.resize(block_count * 16, 0);
-
-        // Convert input to blocks.
-        let blocks = input
-            .chunks_exact(16)
-            .map(|chunk| {
-                let mut block = [0u8; 16];
-                block.copy_from_slice(chunk);
-                Block::from(block)
-            })
-            .collect::<Vec<Block>>();
-
-        let tag = self
-            .core
-            .finalize(&blocks)
-            .expect("Input length should be valid");
-
-        Ok(tag.to_bytes().to_vec())
     }
 }
 
@@ -337,11 +314,8 @@ mod tests {
 
         tokio::try_join!(sender.flush(&mut ctx_a), receiver.flush(&mut ctx_b)).unwrap();
 
-        let sender = sender.finalize().unwrap();
-        let receiver = receiver.finalize().unwrap();
-
-        let sender_share = sender.compute(message.clone()).unwrap();
-        let receiver_share = receiver.compute(message.clone()).unwrap();
+        let sender_share = sender.finalize(message.clone()).unwrap();
+        let receiver_share = receiver.finalize(message.clone()).unwrap();
 
         let tag = sender_share
             .iter()
@@ -372,11 +346,8 @@ mod tests {
 
         tokio::try_join!(sender.flush(&mut ctx_a), receiver.flush(&mut ctx_b)).unwrap();
 
-        let sender = sender.finalize().unwrap();
-        let receiver = receiver.finalize().unwrap();
-
-        let sender_share = sender.compute(message.clone()).unwrap();
-        let receiver_share = receiver.compute(message.clone()).unwrap();
+        let sender_share = sender.finalize(message.clone()).unwrap();
+        let receiver_share = receiver.finalize(message.clone()).unwrap();
 
         let tag = sender_share
             .iter()
@@ -407,11 +378,8 @@ mod tests {
 
         tokio::try_join!(sender.flush(&mut ctx_a), receiver.flush(&mut ctx_b)).unwrap();
 
-        let sender = sender.finalize().unwrap();
-        let receiver = receiver.finalize().unwrap();
-
-        let sender_share = sender.compute(long_message.clone()).unwrap();
-        let receiver_share = receiver.compute(long_message.clone()).unwrap();
+        let sender_share = sender.finalize(long_message.clone()).unwrap();
+        let receiver_share = receiver.finalize(long_message.clone()).unwrap();
 
         let tag = sender_share
             .iter()
@@ -443,12 +411,8 @@ mod tests {
 
         tokio::try_join!(sender.flush(&mut ctx_a), receiver.flush(&mut ctx_b)).unwrap();
 
-        let sender = sender.finalize().unwrap();
-        let receiver = receiver.finalize().unwrap();
-
-        // Compute and check first message.
-        let sender_share = sender.compute(first_message.clone()).unwrap();
-        let receiver_share = receiver.compute(first_message.clone()).unwrap();
+        let sender_share = sender.finalize(first_message.clone()).unwrap();
+        let receiver_share = receiver.finalize(first_message.clone()).unwrap();
 
         let tag = sender_share
             .iter()
@@ -459,8 +423,8 @@ mod tests {
         assert_eq!(tag, ghash_reference_impl(h, &first_message));
 
         // Compute and check second message.
-        let sender_share = sender.compute(second_message.clone()).unwrap();
-        let receiver_share = receiver.compute(second_message.clone()).unwrap();
+        let sender_share = sender.finalize(second_message.clone()).unwrap();
+        let receiver_share = receiver.finalize(second_message.clone()).unwrap();
 
         let tag = sender_share
             .iter()
