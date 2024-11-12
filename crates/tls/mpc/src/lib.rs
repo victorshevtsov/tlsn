@@ -9,7 +9,7 @@
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
-//mod components;
+mod components;
 mod config;
 mod error;
 //pub(crate) mod follower;
@@ -21,7 +21,7 @@ mod record_layer;
 mod transcript;
 //mod dump;
 
-//pub use components::build_components;
+pub use components::{build_follower, build_leader};
 pub use config::{
     MpcTlsCommonConfig, MpcTlsCommonConfigBuilder, MpcTlsCommonConfigBuilderError,
     MpcTlsFollowerConfig, MpcTlsFollowerConfigBuilder, MpcTlsFollowerConfigBuilderError,

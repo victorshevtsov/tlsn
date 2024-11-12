@@ -3,7 +3,7 @@ use derive_builder::Builder;
 const DEFAULT_TRANSCRIPT_MAX_SIZE: usize = 1 << 14;
 
 /// Transcript configuration.
-#[derive(Debug, Clone, Builder)]
+#[derive(Debug, Clone, Copy, Builder)]
 pub struct TranscriptConfig {
     /// The maximum number of bytes that can be written to the transcript during
     /// the **online** phase, i.e. while the MPC-TLS connection is active.
@@ -57,7 +57,7 @@ impl TranscriptConfig {
 }
 
 /// Configuration options which are common to both the leader and the follower
-#[derive(Debug, Clone, Builder)]
+#[derive(Debug, Clone, Copy, Builder)]
 pub struct MpcTlsCommonConfig {
     /// The number of threads to use
     #[builder(default = "8")]

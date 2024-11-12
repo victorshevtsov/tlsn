@@ -4,8 +4,9 @@ use crate::{
         ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, MpcTlsMessage,
         ServerFinishedVd,
     },
+    record_layer::aead::{ghash::Ghash, AesGcmDecrypt, AesGcmEncrypt},
     transcript::Transcript,
-    Direction, MpcTlsChannel, MpcTlsLeaderConfig,
+    Direction, MpcTlsChannel, MpcTlsLeaderConfig, TlsRole,
 };
 use async_trait::async_trait;
 use cipher::{aes::Aes128, Cipher, CipherCircuit};
@@ -14,9 +15,11 @@ use hmac_sha256::{Prf, PrfOutput};
 use ke::KeyExchange;
 use key_exchange as ke;
 use ludi::Context as LudiContext;
-use mpz_common::Context;
+use mpz_common::{Context, Flush};
+use mpz_fields::gf2_128::Gf2_128;
 use mpz_memory_core::{binary::Binary, Memory, MemoryExt, View};
-use mpz_vm_core::Vm;
+use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
+use mpz_vm_core::{Execute, Vm};
 use std::collections::VecDeque;
 use tls_backend::{
     Backend, BackendError, BackendNotifier, BackendNotify, DecryptMode, EncryptMode,
@@ -35,14 +38,14 @@ use tls_core::{
 };
 use tracing::{debug, instrument, trace};
 
-mod actor;
-use actor::MpcTlsLeaderCtrl;
+//mod actor;
+//use actor::MpcTlsLeaderCtrl;
 
 /// Controller for MPC-TLS leader.
-pub type LeaderCtrl = MpcTlsLeaderCtrl;
+//pub type LeaderCtrl = MpcTlsLeaderCtrl;
 
 /// MPC-TLS leader.
-pub struct MpcTlsLeader<K, P, C, Ctx, V> {
+pub struct MpcTlsLeader<K, P, C, Sc, Ctx, V> {
     config: MpcTlsLeaderConfig,
     channel: MpcTlsChannel,
 
@@ -51,6 +54,8 @@ pub struct MpcTlsLeader<K, P, C, Ctx, V> {
     ke: K,
     prf: P,
     cipher: C,
+    ghash_enc: Ghash<Sc>,
+    ghash_dec: Ghash<Sc>,
     ctx: Ctx,
     vm: V,
     /// When set, notifies the backend that there are TLS messages which need to
@@ -66,14 +71,17 @@ pub struct MpcTlsLeader<K, P, C, Ctx, V> {
     prf_out: Option<PrfOutput>,
 }
 
-impl<K, P, C, Ctx, V> MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
     C: Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     /// Create a new leader instance
     pub fn new(
@@ -82,6 +90,8 @@ where
         ke: K,
         prf: P,
         cipher: C,
+        ghash_enc: Ghash<Sc>,
+        ghash_dec: Ghash<Sc>,
         ctx: Ctx,
         vm: V,
     ) -> Self {
@@ -94,6 +104,8 @@ where
             ke,
             prf,
             cipher,
+            ghash_enc,
+            ghash_dec,
             ctx,
             vm,
             notifier: BackendNotifier::new(),
@@ -111,50 +123,57 @@ where
     where
         C: Cipher<Aes128, V>,
     {
-        let pms = self.ke.setup(&mut self.vm)?.into_value();
-        let prf_out = self.prf.setup(&mut self.vm, pms)?;
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
 
+        // Allocate
+        self.ke.alloc()?;
+        self.ghash_enc.alloc()?;
+        self.ghash_dec.alloc()?;
+
+        // Setup
+        let pms = self.ke.setup(vm)?.into_value();
+        let prf_out = self.prf.setup(vm, pms)?;
+
+        // Set up encryption
         self.cipher.set_key(prf_out.keys.client_write_key);
         self.cipher.set_iv(prf_out.keys.client_iv);
 
         let traffic_size = self.config.common().tx_config().max_online_size();
         let keystream_encrypt = self
             .cipher
-            .alloc(&mut self.vm, traffic_size)
+            .alloc(vm, traffic_size)
             .map_err(MpcTlsError::cipher)?;
+
+        // Set up decryption
+        self.cipher.set_key(prf_out.keys.server_write_key);
+        self.cipher.set_iv(prf_out.keys.server_iv);
 
         let traffic_size_mpc = self.config.common().rx_config().max_online_size();
-        /// For this to work, we need to convert the mpc vm to zk vm at some point.
         let traffic_size_zk = self.config.common().rx_config().max_offline_size();
+
         let keystream_decrypt = self
             .cipher
-            .alloc(&mut self.vm, traffic_size_mpc + traffic_size_zk)
+            .alloc(vm, traffic_size_mpc + traffic_size_zk)
             .map_err(MpcTlsError::cipher)?;
 
-        //TODO: Continue here
-        futures::try_join!(self.encrypter.setup(), self.decrypter.setup())?;
+        let client_random = self.state.try_as_ke()?.client_random.0;
+        self.prf.set_client_random(vm, Some(client_random))?;
 
-        futures::try_join!(
-            self.encrypter
-                .set_key(session_keys.client_write_key, session_keys.client_iv),
-            self.decrypter
-                .set_key(session_keys.server_write_key, session_keys.server_iv)
-        )?;
+        // Flush and preprocess
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
-        self.ke.preprocess().await?;
-        self.prf.preprocess().await?;
+        self.ke
+            .flush(ctx)
+            .await
+            .map_err(MpcTlsError::key_exchange)?;
+        self.ghash_enc.flush(ctx).await?;
+        self.ghash_dec.flush(ctx).await?;
 
-        let preprocess_encrypt = self.config.common().tx_config().max_online_size();
-        let preprocess_decrypt = self.config.common().rx_config().max_online_size();
-
-        futures::try_join!(
-            self.encrypter.preprocess(preprocess_encrypt),
-            self.decrypter.preprocess(preprocess_decrypt),
-        )?;
-
-        self.prf
-            .set_client_random(Some(self.state.try_as_ke()?.client_random.0))
-            .await?;
+        // Init encrypter and decrypter
+        let encrypter = AesGcmEncrypt::new(TlsRole::Leader, keystream_encrypt, )
 
         Ok(())
     }
@@ -256,14 +275,17 @@ where
 }
 
 #[async_trait]
-impl<K, P, C, Ctx, V> Backend for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Backend for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
     C: Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn set_protocol_version(&mut self, version: ProtocolVersion) -> Result<(), BackendError> {
         let Ke {
@@ -329,7 +351,8 @@ where
     #[instrument(level = "debug", skip_all, err)]
     async fn set_server_key_share(&mut self, key: PublicKey) -> Result<(), BackendError> {
         let Ke {
-            server_public_key, ..
+            ref mut server_public_key,
+            ..
         } = self.state.try_as_ke_mut()?;
 
         if key.group != NamedGroup::secp256r1 {
@@ -356,7 +379,7 @@ where
         cert_details: ServerCertDetails,
     ) -> Result<(), BackendError> {
         let Ke {
-            server_cert_details,
+            ref mut server_cert_details,
             ..
         } = self.state.try_as_ke_mut()?;
 
@@ -370,7 +393,8 @@ where
         kx_details: ServerKxDetails,
     ) -> Result<(), BackendError> {
         let Ke {
-            server_kx_details, ..
+            ref mut server_kx_details,
+            ..
         } = self.state.try_as_ke_mut()?;
 
         *server_kx_details = Some(kx_details);
@@ -503,6 +527,7 @@ where
             .set_server_random(&mut self.vm, server_random.0)
             .map_err(|err| BackendError::Prf(err.to_string()))?;
 
+        // Set ghash keys
         // futures::try_join!(self.encrypter.start(), self.decrypter.start())?;
 
         self.state = State::Cf(Cf {
