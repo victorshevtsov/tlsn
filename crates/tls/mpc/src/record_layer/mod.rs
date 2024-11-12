@@ -19,6 +19,8 @@ use tls_core::{
 pub(crate) mod aead;
 use aead::{AesGcmDecrypt, AesGcmEncrypt, Decrypt, DecryptPrivate, DecryptPublic, Encrypt};
 
+use self::aead::ghash::Ghash;
+
 pub(crate) struct Encrypter {
     transcript: Transcript,
     aes: AesGcmEncrypt,
@@ -29,7 +31,7 @@ impl Encrypter {
         &mut self,
         vm: &mut V,
         msg: PlainMessage,
-    ) -> Result<Encrypt<'_, impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
+    ) -> Result<Encrypt<impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
@@ -40,7 +42,7 @@ impl Encrypter {
         &mut self,
         vm: &mut V,
         msg: PlainMessage,
-    ) -> Result<Encrypt<'_, impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
+    ) -> Result<Encrypt<impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
@@ -52,7 +54,7 @@ impl Encrypter {
         vm: &mut V,
         msg: PlainMessage,
         visibility: Vis,
-    ) -> Result<Encrypt<'_, impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
+    ) -> Result<Encrypt<impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
         Vis: Fn(&mut V, Vector<U8>) -> Result<(), Err>,
@@ -105,7 +107,7 @@ impl Decrypter {
         vm: &mut V,
         msg: OpaqueMessage,
     ) -> Result<
-        DecryptPrivate<'_, impl Future<Output = Result<Option<PlainMessage>, MpcTlsError>>>,
+        DecryptPrivate<impl Future<Output = Result<Option<PlainMessage>, MpcTlsError>>>,
         MpcTlsError,
     >
     where
@@ -132,10 +134,7 @@ impl Decrypter {
         &mut self,
         vm: &mut V,
         msg: OpaqueMessage,
-    ) -> Result<
-        DecryptPublic<'_, impl Future<Output = Result<PlainMessage, MpcTlsError>>>,
-        MpcTlsError,
-    >
+    ) -> Result<DecryptPublic<impl Future<Output = Result<PlainMessage, MpcTlsError>>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
@@ -154,7 +153,7 @@ impl Decrypter {
         Ok(decrypt)
     }
 
-    fn decrypt<V>(&mut self, vm: &mut V, msg: OpaqueMessage) -> Result<Decrypt<'_>, MpcTlsError>
+    fn decrypt<V>(&mut self, vm: &mut V, msg: OpaqueMessage) -> Result<Decrypt, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
