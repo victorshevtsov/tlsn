@@ -1,17 +1,18 @@
 //! TLS record layer.
 
-use std::future::Future;
-
-use crate::{transcript::Transcript, MpcTlsError};
+use crate::{transcript::Transcript, EncryptRecord, MpcTlsError, TlsRole, Visibility};
 use mpz_memory_core::{
     binary::{Binary, U8},
     MemoryExt, Vector, View, ViewExt,
 };
 use mpz_vm_core::Vm;
+use std::{collections::VecDeque, future::Future};
+use tls_core::msgs::enums::ProtocolVersion;
 use tls_core::{
     cipher::make_tls12_aad,
     msgs::{
         base::Payload,
+        enums::ContentType,
         message::{OpaqueMessage, PlainMessage},
     },
 };
@@ -19,85 +20,78 @@ use tls_core::{
 pub(crate) mod aead;
 use aead::{AesGcmDecrypt, AesGcmEncrypt, Decrypt, DecryptPrivate, DecryptPublic, Encrypt};
 
-use self::aead::ghash::Ghash;
-
 pub(crate) struct Encrypter {
+    role: TlsRole,
     transcript: Transcript,
+    queue: VecDeque<EncryptRecord>,
     aes: AesGcmEncrypt,
 }
 
 impl Encrypter {
-    pub(crate) fn encrypt_private<V>(
-        &mut self,
-        vm: &mut V,
-        msg: PlainMessage,
-    ) -> Result<Encrypt<impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
-    where
-        V: Vm<Binary> + View<Binary>,
-    {
-        self.encrypt(vm, msg, ViewExt::mark_private)
+    pub fn push(&mut self, encrypt: EncryptRecord) {
+        self.queue.push_back(encrypt);
     }
 
-    pub(crate) fn encrypt_public<V>(
-        &mut self,
-        vm: &mut V,
-        msg: PlainMessage,
-    ) -> Result<Encrypt<impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
+    fn encrypt<V>(&mut self, vm: &mut V) -> Result<Encrypt, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
-        self.encrypt(vm, msg, ViewExt::mark_public)
-    }
+        let encrypt_records = Vec::from(std::mem::take(&mut self.queue));
 
-    fn encrypt<V, Vis, Err>(
-        &mut self,
-        vm: &mut V,
-        msg: PlainMessage,
-        visibility: Vis,
-    ) -> Result<Encrypt<impl Future<Output = Result<OpaqueMessage, MpcTlsError>>>, MpcTlsError>
-    where
-        V: Vm<Binary> + View<Binary>,
-        Vis: Fn(&mut V, Vector<U8>) -> Result<(), Err>,
-        Err: std::error::Error + Send + Sync + 'static,
-    {
-        let PlainMessage {
-            typ,
-            version,
-            payload,
-        } = msg;
+        let mut encrypts = Vec::with_capacity(encrypt_records.len());
+        for record in encrypt_records {
+            let EncryptRecord { msg, visibility } = record;
 
-        let seq = self.transcript.seq();
-        let len = payload.0.len();
-        let explicit_nonce = seq.to_be_bytes();
-        let aad = make_tls12_aad(seq, typ, version, len);
-        let plaintext = payload.0;
-
-        let plaintext_ref: Vector<U8> = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
-        visibility(vm, plaintext_ref).map_err(MpcTlsError::vm)?;
-
-        let encrypt = self
-            .aes
-            .encrypt(vm, plaintext_ref, explicit_nonce, plaintext, aad)?;
-
-        self.transcript.record(typ, plaintext_ref);
-
-        let encrypt = encrypt.map_cipher(move |ciphertext| {
-            let mut payload = explicit_nonce.to_vec();
-            payload.extend(ciphertext);
-
-            OpaqueMessage {
+            let PlainMessage {
                 typ,
                 version,
-                payload: Payload::new(payload),
-            }
-        });
+                payload,
+            } = msg;
 
+            let seq = self.transcript.seq();
+            let len = payload.0.len();
+            let explicit_nonce = seq.to_be_bytes();
+            let aad = make_tls12_aad(seq, typ, version, len);
+
+            let plaintext = payload.0;
+            let plaintext_ref: Vector<U8> = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
+            match visibility {
+                Visibility::Private => match self.role {
+                    TlsRole::Leader => vm.mark_private(plaintext_ref).map_err(MpcTlsError::vm)?,
+                    TlsRole::Follower => vm.mark_blind(plaintext_ref).map_err(MpcTlsError::vm)?,
+                },
+                Visibility::Public => vm.mark_public(plaintext_ref).map_err(MpcTlsError::vm)?,
+            }
+
+            self.transcript.record(typ, plaintext_ref);
+            let encrypt = EncryptRequest {
+                plaintext,
+                plaintext_ref,
+                typ,
+                version,
+                explicit_nonce,
+                aad,
+            };
+            encrypts.push(encrypt);
+        }
+
+        let encrypt = self.aes.encrypt(vm, encrypts)?;
         Ok(encrypt)
     }
 }
 
+struct EncryptRequest {
+    plaintext: Vec<u8>,
+    plaintext_ref: Vector<U8>,
+    typ: ContentType,
+    version: ProtocolVersion,
+    explicit_nonce: [u8; 8],
+    aad: [u8; 13],
+}
+
 pub(crate) struct Decrypter {
     transcript: Transcript,
+    queue: VecDeque<DecryptRecord>,
     aes: AesGcmDecrypt,
 }
 

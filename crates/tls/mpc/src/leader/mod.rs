@@ -1,8 +1,8 @@
 use crate::{
     error::MpcTlsError,
     msg::{
-        ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, MpcTlsMessage,
-        ServerFinishedVd,
+        ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, EncryptClientFinished,
+        MpcTlsMessage, ServerFinishedVd,
     },
     record_layer::aead::{ghash::Ghash, AesGcmDecrypt, AesGcmEncrypt},
     transcript::Transcript,
@@ -17,7 +17,7 @@ use key_exchange as ke;
 use ludi::Context as LudiContext;
 use mpz_common::{Context, Flush};
 use mpz_fields::gf2_128::Gf2_128;
-use mpz_memory_core::{binary::Binary, Memory, MemoryExt, View};
+use mpz_memory_core::{binary::Binary, view::VisibilityView, Memory, MemoryExt, View};
 use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
 use mpz_vm_core::{Execute, Vm};
 use std::collections::VecDeque;
@@ -67,7 +67,6 @@ pub struct MpcTlsLeader<K, P, C, Sc, Ctx, V> {
     buffer: VecDeque<OpaqueMessage>,
     /// Whether we have already committed to the transcript.
     committed: bool,
-    transcript: Transcript,
     prf_out: Option<PrfOutput>,
 }
 
@@ -113,7 +112,6 @@ where
             buffer: VecDeque::new(),
             committed: false,
             prf_out: None,
-            transcript: Transcript::default(),
         }
     }
 
@@ -173,7 +171,7 @@ where
         self.ghash_dec.flush(ctx).await?;
 
         // Init encrypter and decrypter
-        let encrypter = AesGcmEncrypt::new(TlsRole::Leader, keystream_encrypt, )
+        //let encrypter = AesGcmEncrypt::new(TlsRole::Leader, keystream_encrypt, )
 
         Ok(())
     }
@@ -192,7 +190,17 @@ where
         &mut self,
         msg: PlainMessage,
     ) -> Result<OpaqueMessage, MpcTlsError> {
-        todo!()
+        let Cf { data } = self.state.take().try_into_cf()?;
+
+        self.channel
+            .send(MpcTlsMessage::EncryptClientFinished(EncryptClientFinished))
+            .await?;
+
+        let msg = self.encrypter.encrypt_public(msg).await?;
+
+        self.state = State::Sf(Sf { data });
+
+        Ok(msg)
     }
 
     #[instrument(level = "debug", skip_all, err)]

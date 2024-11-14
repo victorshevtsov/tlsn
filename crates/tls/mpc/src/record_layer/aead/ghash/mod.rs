@@ -19,10 +19,23 @@ pub(crate) use ghash_inner::{
     Ghash, GhashCompute, GhashConfig, GhashConfigBuilder, GhashConfigBuilderError,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct Tag(Vec<u8>);
+/// Contains data needed to compute tags.
+pub(crate) struct TagComputer {
+    j0s: Vec<Vec<u8>>,
+    ciphertexts: Vec<Vec<u8>>,
+    aads: Vec<[u8; 13]>,
+}
 
-impl Tag {
+impl TagComputer {
+    /// Creates a new instance.
+    pub(crate) fn new(j0s: Vec<Vec<u8>>, ciphertexts: Vec<Vec<u8>>, aads: Vec<[u8; 13]>) -> Self {
+        Self {
+            j0s,
+            ciphertexts,
+            aads,
+        }
+    }
+
     /// Computes the tag for a ciphertext and additional data.
     ///
     /// The commit-reveal step is not required for computing a tag sent to the
@@ -32,41 +45,59 @@ impl Tag {
     ///
     /// * `ctx` - The context for IO.
     /// * `ghash` - An instance for computing ghash.
-    /// * `j0` - A share of the j0 block.
-    /// * `ciphertext` - A future resolving to ciphertext.
-    /// * `aad`- Additional data for AEAD.
+    #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn compute<Ctx>(
+        self,
         ctx: &mut Ctx,
         ghash: &GhashCompute,
-        j0: Vec<u8>,
-        ciphertext: &[u8],
-        aad: Vec<u8>,
-    ) -> Result<Self, MpcTlsError>
+    ) -> Result<TagBatch, MpcTlsError>
     where
         Ctx: Context,
     {
-        let ciphertext_padded = build_ghash_data(aad, ciphertext.to_vec());
-        let hash = ghash.compute(ciphertext_padded)?;
+        let mut shares = Vec::with_capacity(self.ciphertexts.len());
+        for ((j0, ciphertext), aad) in self.j0s.into_iter().zip(self.ciphertexts).zip(self.aads) {
+            let ciphertext_padded = build_ghash_data(aad.to_vec(), ciphertext);
+            let hash = ghash.compute(ciphertext_padded)?;
+            let tag_share: Vec<u8> = j0
+                .into_iter()
+                .zip(hash.into_iter())
+                .map(|(a, b)| a ^ b)
+                .collect();
+            shares.push(Tag(tag_share));
+        }
 
-        let tag_share = j0
-            .into_iter()
-            .zip(hash.into_iter())
-            .map(|(a, b)| a ^ b)
-            .collect();
-        let tag_share = Tag(tag_share);
+        let batch = TagBatch(shares);
+        let batch = batch.combine(ctx).await?;
 
+        Ok(batch)
+    }
+}
+
+/// A batch of several tags
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct TagBatch(Vec<Tag>);
+
+impl TagBatch {
+    pub(crate) async fn combine<Ctx>(self, ctx: &mut Ctx) -> Result<Self, MpcTlsError>
+    where
+        Ctx: Context,
+    {
         // TODO: The follower doesn't really need to learn the tag,
         // we could reduce some latency by not sending it.
         let io = ctx.io_mut();
 
-        io.send(tag_share.clone()).await?;
-        let other_tag_share: Tag = io.expect_next().await?;
-
-        let tag = tag_share + other_tag_share;
-        Ok(tag)
+        io.send(self.clone()).await?;
+        let other_batch: TagBatch = io.expect_next().await?;
+        let tags = self
+            .0
+            .into_iter()
+            .zip(other_batch.0)
+            .map(|(first, second)| first + second)
+            .collect();
+        Ok(TagBatch(tags))
     }
 
-    /// Verifies a purported tag against `self`.
+    /// Verifies purported tag batch against `self`.
     ///
     /// Verifying a tag requires a commit-reveal protocol between the leader and
     /// follower. Without it, the party which receives the other's tag share first
@@ -77,60 +108,86 @@ impl Tag {
     ///
     /// * `ctx` - The context for IO.
     /// * `role` - The role of the party.
-    /// * `purported_tag` - The tag to verify against `self`.
-    #[instrument(level = "debug", skip_all, err)]
-    pub(crate) async fn verify<Ctx: Context>(
+    /// * `purported_batch` - The tags to verify against `self`.
+    #[instrument(level = "trace", skip_all, err)]
+    pub(crate) async fn verify<Ctx>(
         self,
         ctx: &mut Ctx,
         role: TlsRole,
-        purported_tag: Vec<u8>,
-    ) -> Result<(), MpcTlsError> {
+        purported_batch: TagBatch,
+    ) -> Result<(), MpcTlsError>
+    where
+        Ctx: Context,
+    {
         let io = ctx.io_mut();
-        let tag = match role {
+        let batch = match role {
             TlsRole::Leader => {
-                // Send commitment of tag share to follower.
+                // Send commitment to follower.
                 let (decommitment, commitment) = self.clone().hash_commit();
 
                 io.send(commitment).await?;
 
-                let follower_share: Tag = io.expect_next().await?;
+                let follower_batch: TagBatch = io.expect_next().await?;
 
-                // Send decommitment (tag share) to follower.
+                // Send decommitment to follower.
                 io.send(decommitment).await?;
 
-                self + follower_share
+                self + follower_batch
             }
             TlsRole::Follower => {
                 // Wait for commitment from leader.
                 let commitment: Hash = io.expect_next().await?;
 
-                // Send tag share to leader.
+                // Send tag batch to leader.
                 io.send(self.clone()).await?;
 
-                // Expect decommitment (tag share) from leader.
-                let decommitment: Decommitment<Tag> = io.expect_next().await?;
+                // Expect decommitment from leader.
+                let decommitment: Decommitment<TagBatch> = io.expect_next().await?;
 
                 // Verify decommitment.
                 decommitment.verify(&commitment).map_err(|_| {
                     MpcTlsError::peer("leader tag share commitment verification failed")
                 })?;
 
-                let leader_share = decommitment.into_inner();
+                let leader_batch = decommitment.into_inner();
 
-                self + leader_share
+                self + leader_batch
             }
         };
 
-        let purported_tag = Tag(purported_tag);
-
         // Reject if tag is incorrect.
-        if tag != purported_tag {
+        if batch != purported_batch {
             return Err(MpcTlsError::tag("invalid tag"));
         }
 
         Ok(())
     }
 
+    /// Returns the inner tags.
+    pub(crate) fn into_inner(self) -> Vec<Tag> {
+        self.0
+    }
+}
+
+impl Add for TagBatch {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let batch = self
+            .into_inner()
+            .into_iter()
+            .zip(rhs.into_inner())
+            .map(|(a, b)| a + b)
+            .collect();
+        Self(batch)
+    }
+}
+
+/// An authentication tag.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct Tag(Vec<u8>);
+
+impl Tag {
     /// Returns the underlying bytes.
     pub(crate) fn into_inner(self) -> Vec<u8> {
         self.0

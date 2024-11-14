@@ -10,7 +10,7 @@ use mpz_common::{Context, Flush};
 use mpz_core::Block;
 use mpz_fields::gf2_128::Gf2_128;
 use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 
 mod config;
 pub(crate) use config::{GhashConfig, GhashConfigBuilder, GhashConfigBuilderError};
@@ -111,7 +111,9 @@ where
         };
 
         self.state = State::Done;
-        let ghash = GhashCompute { core };
+        let ghash = GhashCompute {
+            core: Arc::new(core),
+        };
 
         Ok(ghash)
     }
@@ -168,7 +170,15 @@ where
 /// Once [`Ghash`] has been finalized with [`Ghash::finalize`] it returns [`GhashCompute`]
 /// which can be used to compute ghash for data.
 pub(crate) struct GhashCompute {
-    core: GhashCore<Finalized>,
+    core: Arc<GhashCore<Finalized>>,
+}
+
+impl Clone for GhashCompute {
+    fn clone(&self) -> Self {
+        Self {
+            core: self.core.clone(),
+        }
+    }
 }
 
 impl GhashCompute {
