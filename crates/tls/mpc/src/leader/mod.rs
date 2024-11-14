@@ -280,6 +280,14 @@ where
 
         Ok(())
     }
+
+    pub(crate) async fn decode_key_private() -> Result<(), MpcTlsError> {
+        todo!()
+    }
+
+    pub(crate) async fn decode_key_blind() -> Result<(), MpcTlsError> {
+        todo!()
+    }
 }
 
 #[async_trait]

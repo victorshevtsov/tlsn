@@ -90,63 +90,13 @@ struct EncryptRequest {
 }
 
 pub(crate) struct Decrypter {
+    role: TlsRole,
     transcript: Transcript,
     queue: VecDeque<DecryptRecord>,
     aes: AesGcmDecrypt,
 }
 
 impl Decrypter {
-    pub(crate) fn decrypt_private<V>(
-        &mut self,
-        vm: &mut V,
-        msg: OpaqueMessage,
-    ) -> Result<
-        DecryptPrivate<impl Future<Output = Result<Option<PlainMessage>, MpcTlsError>>>,
-        MpcTlsError,
-    >
-    where
-        V: Vm<Binary> + View<Binary>,
-    {
-        let typ = msg.typ;
-        let version = msg.version;
-
-        let decrypt = self.decrypt(vm, msg)?;
-        let decrypt = decrypt.private(vm)?;
-
-        let decrypt = decrypt.map_plain(move |plaintext| {
-            plaintext.map(|p| PlainMessage {
-                typ,
-                version,
-                payload: Payload(p),
-            })
-        });
-
-        Ok(decrypt)
-    }
-
-    pub(crate) fn decrypt_public<V>(
-        &mut self,
-        vm: &mut V,
-        msg: OpaqueMessage,
-    ) -> Result<DecryptPublic<impl Future<Output = Result<PlainMessage, MpcTlsError>>>, MpcTlsError>
-    where
-        V: Vm<Binary> + View<Binary>,
-    {
-        let typ = msg.typ;
-        let version = msg.version;
-
-        let decrypt = self.decrypt(vm, msg)?;
-        let decrypt = decrypt.public(vm)?;
-
-        let decrypt = decrypt.map_plain(move |plaintext| PlainMessage {
-            typ,
-            version,
-            payload: Payload::new(plaintext),
-        });
-
-        Ok(decrypt)
-    }
-
     fn decrypt<V>(&mut self, vm: &mut V, msg: OpaqueMessage) -> Result<Decrypt, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
@@ -178,12 +128,13 @@ impl Decrypter {
     }
 }
 
-pub(crate) async fn decode_key_private() -> Result<(), MpcTlsError> {
-    todo!()
-}
-
-pub(crate) async fn decode_key_blind() -> Result<(), MpcTlsError> {
-    todo!()
+struct DecryptRequest {
+    plaintext: Vec<u8>,
+    plaintext_ref: Vector<U8>,
+    typ: ContentType,
+    version: ProtocolVersion,
+    explicit_nonce: [u8; 8],
+    aad: [u8; 13],
 }
 
 /// Proves the plaintext of the message to the other party

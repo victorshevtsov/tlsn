@@ -71,16 +71,7 @@ impl AesGcmEncrypt {
         V: Vm<Binary> + Memory<Binary> + View<Binary>,
     {
         let len = requests.len();
-
-        let mut encrypt = Encrypt {
-            ghash: self.ghash.clone(),
-            j0s: Vec::with_capacity(len),
-            explicit_nonces: Vec::with_capacity(len),
-            ciphertexts: Vec::with_capacity(len),
-            typs: Vec::with_capacity(len),
-            versions: Vec::with_capacity(len),
-            aads: Vec::with_capacity(len),
-        };
+        let mut encrypt = Encrypt::new(self.ghash.clone(), len);
 
         for EncryptRequest {
             plaintext,
@@ -123,6 +114,19 @@ pub(crate) struct Encrypt {
 }
 
 impl Encrypt {
+    /// Creates a new instance.
+    pub(crate) fn new(ghash: GhashCompute, cap: usize) -> Self {
+        Self {
+            ghash,
+            j0s: Vec::with_capacity(cap),
+            explicit_nonces: Vec::with_capacity(cap),
+            ciphertexts: Vec::with_capacity(cap),
+            typs: Vec::with_capacity(cap),
+            versions: Vec::with_capacity(cap),
+            aads: Vec::with_capacity(cap),
+        }
+    }
+
     /// Adds an encrypt operation.
     pub(crate) fn push(
         &mut self,
@@ -141,6 +145,11 @@ impl Encrypt {
         self.aads.push(aad);
     }
 
+    /// Returns the number of records this instance will encrypt.
+    pub(crate) fn len(&self) -> usize {
+        self.ciphertexts.len()
+    }
+
     /// Computes the ciphertext.
     ///
     /// # Arguments
@@ -151,15 +160,14 @@ impl Encrypt {
     where
         Ctx: Context,
     {
-        let len = self.ciphertexts.len();
-        let j0s = self
-            .j0s
-            .into_iter()
-            .map(|j0| j0.decode().map_err(MpcTlsError::decode));
+        let len = self.len();
+
+        let j0s = self.j0s.into_iter().map(|j0| j0.decode());
         let ciphertexts = self
             .ciphertexts
             .into_iter()
             .map(|ciphertext| ciphertext.map_err(MpcTlsError::decode));
+
         let mut future: FuturesOrdered<_> = j0s
             .zip(ciphertexts)
             .map(|(j0, ciphertext)| futures::future::try_join(j0, ciphertext))
@@ -167,6 +175,7 @@ impl Encrypt {
 
         let mut j0s = Vec::with_capacity(len);
         let mut ciphertexts = Vec::with_capacity(len);
+
         while let Some(result) = future.next().await {
             let (j0, ciphertext) = result?;
             j0s.push(j0);

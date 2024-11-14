@@ -36,10 +36,10 @@ impl TagComputer {
         }
     }
 
-    /// Computes the tag for a ciphertext and additional data.
+    /// Computes a tagsa for ciphertexts and returns a [`TagBatch`].
     ///
-    /// The commit-reveal step is not required for computing a tag sent to the
-    /// server, as it will be able to detect if the tag is incorrect.
+    /// The commit-reveal step is not required for computing tags sent to the
+    /// server, as it will be able to detect if tags are incorrect.
     ///
     /// # Arguments
     ///
@@ -55,9 +55,11 @@ impl TagComputer {
         Ctx: Context,
     {
         let mut shares = Vec::with_capacity(self.ciphertexts.len());
+
         for ((j0, ciphertext), aad) in self.j0s.into_iter().zip(self.ciphertexts).zip(self.aads) {
             let ciphertext_padded = build_ghash_data(aad.to_vec(), ciphertext);
             let hash = ghash.compute(ciphertext_padded)?;
+
             let tag_share: Vec<u8> = j0
                 .into_iter()
                 .zip(hash.into_iter())
@@ -82,19 +84,15 @@ impl TagBatch {
     where
         Ctx: Context,
     {
-        // TODO: The follower doesn't really need to learn the tag,
+        // TODO: The follower doesn't really need to learn the tags,
         // we could reduce some latency by not sending it.
         let io = ctx.io_mut();
 
         io.send(self.clone()).await?;
         let other_batch: TagBatch = io.expect_next().await?;
-        let tags = self
-            .0
-            .into_iter()
-            .zip(other_batch.0)
-            .map(|(first, second)| first + second)
-            .collect();
-        Ok(TagBatch(tags))
+        let tags = self + other_batch;
+
+        Ok(tags)
     }
 
     /// Verifies purported tag batch against `self`.
@@ -203,9 +201,9 @@ impl AsRef<[u8]> for Tag {
 impl Add for Tag {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        let tag = self.0.into_iter().zip(rhs.0).map(|(a, b)| a ^ b).collect();
-        Self(tag)
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self.0.iter_mut().zip(rhs.0).for_each(|(a, b)| *a ^= b);
+        self
     }
 }
 
