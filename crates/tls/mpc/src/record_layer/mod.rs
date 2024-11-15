@@ -1,24 +1,24 @@
 //! TLS record layer.
 
-use crate::{transcript::Transcript, EncryptRecord, MpcTlsError, TlsRole, Visibility};
+use crate::{
+    transcript::Transcript, DecryptRecord, EncryptRecord, MpcTlsError, TlsRole, Visibility,
+};
 use mpz_memory_core::{
     binary::{Binary, U8},
     MemoryExt, Vector, View, ViewExt,
 };
 use mpz_vm_core::Vm;
-use std::{collections::VecDeque, future::Future};
-use tls_core::msgs::enums::ProtocolVersion;
+use std::collections::VecDeque;
 use tls_core::{
     cipher::make_tls12_aad,
     msgs::{
-        base::Payload,
-        enums::ContentType,
+        enums::{ContentType, ProtocolVersion},
         message::{OpaqueMessage, PlainMessage},
     },
 };
 
 pub(crate) mod aead;
-use aead::{AesGcmDecrypt, AesGcmEncrypt, Decrypt, DecryptPrivate, DecryptPublic, Encrypt};
+use aead::{ghash::Tag, AesGcmDecrypt, AesGcmEncrypt, Decrypt, Encrypt};
 
 pub(crate) struct Encrypter {
     role: TlsRole,
@@ -97,44 +97,71 @@ pub(crate) struct Decrypter {
 }
 
 impl Decrypter {
-    fn decrypt<V>(&mut self, vm: &mut V, msg: OpaqueMessage) -> Result<Decrypt, MpcTlsError>
+    pub fn push(&mut self, decrypt: DecryptRecord) {
+        self.queue.push_back(decrypt);
+    }
+
+    fn decrypt<V>(&mut self, vm: &mut V) -> Result<Decrypt, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
-        let OpaqueMessage {
-            typ,
-            version,
-            payload,
-        } = msg;
-        let mut ciphertext = payload.0;
+        let decrypt_records = Vec::from(std::mem::take(&mut self.queue));
 
-        let seq = self.transcript.seq();
-        let explicit_nonce: [u8; 8] = ciphertext
-            .drain(..8)
-            .collect::<Vec<u8>>()
-            .try_into()
-            .expect("Should be able to drain explicit nonce");
-        let purported_tag = ciphertext.split_off(ciphertext.len() - 16);
-        let len = ciphertext.len();
-        let aad = make_tls12_aad(seq, typ, version, len);
+        let mut decrypts = Vec::with_capacity(decrypt_records.len());
+        let mut typs = Vec::with_capacity(decrypt_records.len());
 
-        let (decrypt, plaintext_ref) =
-            self.aes
-                .decrypt(vm, explicit_nonce, ciphertext, aad, purported_tag)?;
+        for record in decrypt_records {
+            let DecryptRecord { msg, visibility } = record;
 
-        self.transcript.record(typ, plaintext_ref);
+            let OpaqueMessage {
+                typ,
+                version,
+                payload,
+            } = msg;
+
+            let mut ciphertext = payload.0;
+
+            let seq = self.transcript.seq();
+            let explicit_nonce: [u8; 8] = ciphertext
+                .drain(..8)
+                .collect::<Vec<u8>>()
+                .try_into()
+                .expect("Should be able to drain explicit nonce");
+            let purported_tag = Tag::new(ciphertext.split_off(ciphertext.len() - 16));
+            let len = ciphertext.len();
+            let aad = make_tls12_aad(seq, typ, version, len);
+
+            let decrypt = DecryptRequest {
+                ciphertext,
+                typ,
+                visibility,
+                version,
+                explicit_nonce,
+                aad,
+                purported_tag,
+            };
+
+            decrypts.push(decrypt);
+            typs.push(typ);
+        }
+        let (decrypt, plaintext_refs) = self.aes.decrypt(vm, decrypts)?;
+
+        for (&typ, plaintext_ref) in typs.iter().zip(plaintext_refs) {
+            self.transcript.record(typ, plaintext_ref);
+        }
 
         Ok(decrypt)
     }
 }
 
 struct DecryptRequest {
-    plaintext: Vec<u8>,
-    plaintext_ref: Vector<U8>,
+    ciphertext: Vec<u8>,
     typ: ContentType,
+    visibility: Visibility,
     version: ProtocolVersion,
     explicit_nonce: [u8; 8],
     aad: [u8; 13],
+    purported_tag: Tag,
 }
 
 /// Proves the plaintext of the message to the other party
@@ -142,7 +169,7 @@ struct DecryptRequest {
 /// This verifies the tag of the message and locally decrypts it. Then, this
 /// party commits to the plaintext and proves it encrypts back to the
 /// ciphertext.
-pub(crate) async fn prove_plaintext(msg: OpaqueMessage) -> Result<PlainMessage, MpcTlsError> {
+pub(crate) async fn prove_plaintext(_msg: OpaqueMessage) -> Result<PlainMessage, MpcTlsError> {
     todo!()
 }
 
@@ -151,6 +178,6 @@ pub(crate) async fn prove_plaintext(msg: OpaqueMessage) -> Result<PlainMessage, 
 /// This verifies the tag of the message then has the other party decrypt
 /// it. Then, the other party commits to the plaintext and proves it
 /// encrypts back to the ciphertext.
-pub(crate) async fn verify_plaintext(msg: OpaqueMessage) -> Result<(), MpcTlsError> {
+pub(crate) async fn verify_plaintext(_msg: OpaqueMessage) -> Result<(), MpcTlsError> {
     todo!()
 }

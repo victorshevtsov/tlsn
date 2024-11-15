@@ -53,16 +53,19 @@ pub(crate) enum Direction {
     Recv,
 }
 
+/// Wrapper for TLS records that need to be encrypted.
 struct EncryptRecord {
     msg: PlainMessage,
     visibility: Visibility,
 }
 
+/// Wrapper for TLS records that need to be decrypted.
 struct DecryptRecord {
     msg: OpaqueMessage,
     visibility: Visibility,
 }
 
+/// Sets the visibility for en-/decryption operations.
 enum Visibility {
     Private,
     Public,

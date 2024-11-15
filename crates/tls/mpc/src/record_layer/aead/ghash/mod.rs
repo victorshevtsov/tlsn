@@ -36,24 +36,13 @@ impl TagComputer {
         }
     }
 
-    /// Computes a tagsa for ciphertexts and returns a [`TagBatch`].
-    ///
-    /// The commit-reveal step is not required for computing tags sent to the
-    /// server, as it will be able to detect if tags are incorrect.
+    /// Computes tag shares for ciphertexts and returns a [`TagBatch`].
     ///
     /// # Arguments
     ///
-    /// * `ctx` - The context for IO.
     /// * `ghash` - An instance for computing ghash.
     #[instrument(level = "trace", skip_all, err)]
-    pub(crate) async fn compute<Ctx>(
-        self,
-        ctx: &mut Ctx,
-        ghash: &GhashCompute,
-    ) -> Result<TagBatch, MpcTlsError>
-    where
-        Ctx: Context,
-    {
+    pub(crate) async fn compute(self, ghash: &GhashCompute) -> Result<TagBatch, MpcTlsError> {
         let mut shares = Vec::with_capacity(self.ciphertexts.len());
 
         for ((j0, ciphertext), aad) in self.j0s.into_iter().zip(self.ciphertexts).zip(self.aads) {
@@ -69,17 +58,24 @@ impl TagComputer {
         }
 
         let batch = TagBatch(shares);
-        let batch = batch.combine(ctx).await?;
-
         Ok(batch)
     }
 }
 
 /// A batch of several tags
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct TagBatch(Vec<Tag>);
+pub(crate) struct TagBatch(Vec<Tag>);
 
 impl TagBatch {
+    /// Creates a new instance
+    pub(crate) fn new(tags: Vec<Tag>) -> Self {
+        Self(tags)
+    }
+
+    /// Combines tag shares and returns the full tags.
+    ///
+    /// The commit-reveal step is not required for computing tags sent to the
+    /// server, as it will be able to detect if tags are incorrect.
     pub(crate) async fn combine<Ctx>(self, ctx: &mut Ctx) -> Result<Self, MpcTlsError>
     where
         Ctx: Context,
@@ -183,9 +179,14 @@ impl Add for TagBatch {
 
 /// An authentication tag.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct Tag(Vec<u8>);
+pub(crate) struct Tag(Vec<u8>);
 
 impl Tag {
+    /// Creates a new tag.
+    pub(crate) fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
     /// Returns the underlying bytes.
     pub(crate) fn into_inner(self) -> Vec<u8> {
         self.0
