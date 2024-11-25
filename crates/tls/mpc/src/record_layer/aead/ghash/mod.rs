@@ -42,7 +42,7 @@ impl TagComputer {
     ///
     /// * `ghash` - An instance for computing ghash.
     #[instrument(level = "trace", skip_all, err)]
-    pub(crate) async fn compute(self, ghash: &GhashCompute) -> Result<TagBatch, MpcTlsError> {
+    pub(crate) fn compute(self, ghash: &GhashCompute) -> Result<TagBatch, MpcTlsError> {
         let mut shares = Vec::with_capacity(self.ciphertexts.len());
 
         for ((j0, ciphertext), aad) in self.j0s.into_iter().zip(self.ciphertexts).zip(self.aads) {

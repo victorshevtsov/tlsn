@@ -8,7 +8,6 @@ use mpz_memory_core::{
     MemoryExt, Vector, View, ViewExt,
 };
 use mpz_vm_core::Vm;
-use std::collections::VecDeque;
 use tls_core::{
     cipher::make_tls12_aad,
     msgs::{
@@ -23,20 +22,20 @@ use aead::{ghash::Tag, AesGcmDecrypt, AesGcmEncrypt, Decrypt, Encrypt};
 pub(crate) struct Encrypter {
     role: TlsRole,
     transcript: Transcript,
-    queue: VecDeque<EncryptRecord>,
+    queue: Vec<EncryptRecord>,
     aes: AesGcmEncrypt,
 }
 
 impl Encrypter {
     pub fn push(&mut self, encrypt: EncryptRecord) {
-        self.queue.push_back(encrypt);
+        self.queue.push(encrypt);
     }
 
     fn encrypt<V>(&mut self, vm: &mut V) -> Result<Encrypt, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
-        let encrypt_records = Vec::from(std::mem::take(&mut self.queue));
+        let encrypt_records = std::mem::take(&mut self.queue);
 
         let mut encrypts = Vec::with_capacity(encrypt_records.len());
         for record in encrypt_records {
@@ -92,20 +91,20 @@ struct EncryptRequest {
 pub(crate) struct Decrypter {
     role: TlsRole,
     transcript: Transcript,
-    queue: VecDeque<DecryptRecord>,
+    queue: Vec<DecryptRecord>,
     aes: AesGcmDecrypt,
 }
 
 impl Decrypter {
     pub fn push(&mut self, decrypt: DecryptRecord) {
-        self.queue.push_back(decrypt);
+        self.queue.push(decrypt);
     }
 
     fn decrypt<V>(&mut self, vm: &mut V) -> Result<Decrypt, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
-        let decrypt_records = Vec::from(std::mem::take(&mut self.queue));
+        let decrypt_records = std::mem::take(&mut self.queue);
 
         let mut decrypts = Vec::with_capacity(decrypt_records.len());
         let mut typs = Vec::with_capacity(decrypt_records.len());

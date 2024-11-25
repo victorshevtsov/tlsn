@@ -176,6 +176,15 @@ where
         Ok(())
     }
 
+    #[instrument(level = "debug", skip_all, err)]
+    async fn start(&mut self) -> Result<(), MpcTlsError> {
+        todo!()
+        // let h_share = self.aes_block.encrypt_share(vec![0u8; 16]).await?;
+        // self.ghash.set_key(h_share).await?;
+
+        // Ok(())
+    }
+
     /// Returns the number of bytes sent and received.
     pub fn bytes_transferred(&self) -> (usize, usize) {
         todo!()
