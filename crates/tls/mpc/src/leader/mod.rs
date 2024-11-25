@@ -1,23 +1,26 @@
 use crate::{
+    decode::Decode,
     error::MpcTlsError,
     msg::{
         ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, EncryptClientFinished,
         MpcTlsMessage, ServerFinishedVd,
     },
-    record_layer::aead::{ghash::Ghash, AesGcmDecrypt, AesGcmEncrypt},
-    transcript::Transcript,
+    record_layer::{aead::transmute, Decrypter, Encrypter},
     Direction, MpcTlsChannel, MpcTlsLeaderConfig, TlsRole,
 };
 use async_trait::async_trait;
-use cipher::{aes::Aes128, Cipher, CipherCircuit};
-use futures::{SinkExt, TryFutureExt};
+use cipher::{aes::Aes128, Cipher};
+use futures::SinkExt;
 use hmac_sha256::{Prf, PrfOutput};
 use ke::KeyExchange;
 use key_exchange as ke;
 use ludi::Context as LudiContext;
 use mpz_common::{Context, Flush};
 use mpz_fields::gf2_128::Gf2_128;
-use mpz_memory_core::{binary::Binary, view::VisibilityView, Memory, MemoryExt, View};
+use mpz_memory_core::{
+    binary::{Binary, U8},
+    Array, Memory, MemoryExt, View, ViewExt,
+};
 use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
 use mpz_vm_core::{Execute, Vm};
 use std::collections::VecDeque;
@@ -54,8 +57,8 @@ pub struct MpcTlsLeader<K, P, C, Sc, Ctx, V> {
     ke: K,
     prf: P,
     cipher: C,
-    ghash_enc: Ghash<Sc>,
-    ghash_dec: Ghash<Sc>,
+    encrypter: Encrypter<Sc>,
+    decrypter: Decrypter<Sc>,
     ctx: Ctx,
     vm: V,
     /// When set, notifies the backend that there are TLS messages which need to
@@ -89,8 +92,8 @@ where
         ke: K,
         prf: P,
         cipher: C,
-        ghash_enc: Ghash<Sc>,
-        ghash_dec: Ghash<Sc>,
+        encrypter: Encrypter<Sc>,
+        decrypter: Decrypter<Sc>,
         ctx: Ctx,
         vm: V,
     ) -> Self {
@@ -103,8 +106,8 @@ where
             ke,
             prf,
             cipher,
-            ghash_enc,
-            ghash_dec,
+            encrypter,
+            decrypter,
             ctx,
             vm,
             notifier: BackendNotifier::new(),
@@ -123,11 +126,12 @@ where
     {
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
+        let role = TlsRole::Leader;
 
         // Allocate
         self.ke.alloc()?;
-        self.ghash_enc.alloc()?;
-        self.ghash_dec.alloc()?;
+        self.encrypter.alloc()?;
+        self.decrypter.alloc()?;
 
         // Setup
         let pms = self.ke.setup(vm)?.into_value();
@@ -143,6 +147,18 @@ where
             .alloc(vm, traffic_size)
             .map_err(MpcTlsError::cipher)?;
 
+        let zero_ref: Array<U8, 16> = vm.alloc().map_err(MpcTlsError::vm)?;
+        vm.mark_public(zero_ref).map_err(MpcTlsError::vm)?;
+
+        let ghash_key = self
+            .cipher
+            .assign_block(vm, zero_ref, [0_u8; 16])
+            .map_err(MpcTlsError::cipher)?;
+        let ghash_key = transmute(ghash_key);
+        let ghash_key = Decode::new(vm, role, ghash_key)?.shared(vm)?;
+
+        self.encrypter.prepare(keystream_encrypt, ghash_key)?;
+
         // Set up decryption
         self.cipher.set_key(prf_out.keys.server_write_key);
         self.cipher.set_iv(prf_out.keys.server_iv);
@@ -155,6 +171,19 @@ where
             .alloc(vm, traffic_size_mpc + traffic_size_zk)
             .map_err(MpcTlsError::cipher)?;
 
+        let zero_ref: Array<U8, 16> = vm.alloc().map_err(MpcTlsError::vm)?;
+        vm.mark_public(zero_ref).map_err(MpcTlsError::vm)?;
+
+        let ghash_key = self
+            .cipher
+            .assign_block(vm, zero_ref, [0_u8; 16])
+            .map_err(MpcTlsError::cipher)?;
+        let ghash_key = transmute(ghash_key);
+        let ghash_key = Decode::new(vm, role, ghash_key)?.shared(vm)?;
+
+        self.decrypter.prepare(keystream_decrypt, ghash_key)?;
+
+        // Set client random
         let client_random = self.state.try_as_ke()?.client_random.0;
         self.prf.set_client_random(vm, Some(client_random))?;
 
@@ -167,22 +196,21 @@ where
             .flush(ctx)
             .await
             .map_err(MpcTlsError::key_exchange)?;
-        self.ghash_enc.flush(ctx).await?;
-        self.ghash_dec.flush(ctx).await?;
-
-        // Init encrypter and decrypter
-        //let encrypter = AesGcmEncrypt::new(TlsRole::Leader, keystream_encrypt, )
 
         Ok(())
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn start(&mut self) -> Result<(), MpcTlsError> {
-        todo!()
-        // let h_share = self.aes_block.encrypt_share(vec![0u8; 16]).await?;
-        // self.ghash.set_key(h_share).await?;
+    async fn start(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
+    where
+        C: Cipher<Aes128, V>,
+        Ctx: Context,
+    {
+        // TODO: Optimize this with ctx try join
+        self.encrypter.setup(ctx).await?;
+        self.decrypter.setup(ctx).await?;
 
-        // Ok(())
+        Ok(())
     }
 
     /// Returns the number of bytes sent and received.

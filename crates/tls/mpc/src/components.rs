@@ -1,5 +1,8 @@
 use crate::{
-    record_layer::aead::ghash::{Ghash, GhashConfig},
+    record_layer::{
+        aead::ghash::{Ghash, GhashConfig},
+        Decrypter, Encrypter,
+    },
     TlsRole,
 };
 use cipher::aes::MpcAes;
@@ -21,8 +24,8 @@ pub fn build_leader<V, RSP, RRP, RSGF>(
     impl KeyExchange<V>,
     impl Prf<V>,
     MpcAes,
-    Ghash<impl ShareConvert<Gf2_128>>,
-    Ghash<impl ShareConvert<Gf2_128>>,
+    Encrypter<impl ShareConvert<Gf2_128>>,
+    Decrypter<impl ShareConvert<Gf2_128>>,
 )
 where
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
@@ -57,12 +60,15 @@ where
         GhashConfig::builder().build().unwrap(),
         ShareConversionSender::new(rs_gf0),
     );
+    let encrypter = Encrypter::new(role, ghash_encrypt);
+
     let ghash_decrypt = Ghash::new(
         GhashConfig::builder().build().unwrap(),
         ShareConversionSender::new(rs_gf1),
     );
+    let decrypter = Decrypter::new(role, ghash_decrypt);
 
-    (ke, prf, cipher, ghash_encrypt, ghash_decrypt)
+    (ke, prf, cipher, encrypter, decrypter)
 }
 
 /// Builds the components for MPC-TLS follower.

@@ -32,6 +32,21 @@ pub(crate) struct AesGcmDecrypt {
 }
 
 impl AesGcmDecrypt {
+    /// Creates a new instance for decryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `role` - The role of the party.
+    /// * `keystream` - The keystream for AES-GCM.
+    /// * `ghash` - An instance for computing Ghash.
+    pub(crate) fn new(role: TlsRole, keystream: Keystream<Aes128>, ghash: GhashCompute) -> Self {
+        Self {
+            role,
+            keystream,
+            ghash,
+        }
+    }
+
     /// Preparation for decrypting a ciphertext.
     ///
     /// Returns [`Decrypt`] and plaintext refs.

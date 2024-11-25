@@ -1,12 +1,17 @@
 //! TLS record layer.
 
 use crate::{
-    transcript::Transcript, DecryptRecord, EncryptRecord, MpcTlsError, TlsRole, Visibility,
+    decode::OneTimePadShared, transcript::Transcript, DecryptRecord, EncryptRecord, MpcTlsError,
+    TlsRole, Visibility,
 };
+use cipher::{aes::Aes128, Keystream};
+use mpz_common::{Context, Flush};
+use mpz_fields::gf2_128::Gf2_128;
 use mpz_memory_core::{
     binary::{Binary, U8},
     MemoryExt, Vector, View, ViewExt,
 };
+use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
 use mpz_vm_core::Vm;
 use tls_core::{
     cipher::make_tls12_aad,
@@ -19,14 +24,85 @@ use tls_core::{
 pub(crate) mod aead;
 use aead::{ghash::Tag, AesGcmDecrypt, AesGcmEncrypt, Decrypt, Encrypt};
 
-pub(crate) struct Encrypter {
+use self::aead::ghash::Ghash;
+
+pub(crate) struct Encrypter<Sc> {
     role: TlsRole,
     transcript: Transcript,
     queue: Vec<EncryptRecord>,
-    aes: AesGcmEncrypt,
+    state: EncryptState<Sc>,
 }
 
-impl Encrypter {
+impl<Sc> Encrypter<Sc> {
+    pub fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
+        Self {
+            role,
+            transcript: Transcript::default(),
+            queue: Vec::default(),
+            state: EncryptState::Init { ghash },
+        }
+    }
+
+    pub fn alloc(&mut self) -> Result<(), MpcTlsError>
+    where
+        Sc: ShareConvert<Gf2_128>,
+        Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+        Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+    {
+        let EncryptState::Init { ref mut ghash, .. } = self.state else {
+            return Err(MpcTlsError::encrypt("Encrypter is not in Init state."));
+        };
+
+        ghash.alloc()?;
+        Ok(())
+    }
+
+    pub fn prepare(
+        &mut self,
+        keystream: Keystream<Aes128>,
+        ghash_key: OneTimePadShared,
+    ) -> Result<(), MpcTlsError> {
+        let EncryptState::Init { ghash } = std::mem::replace(&mut self.state, EncryptState::Error)
+        else {
+            return Err(MpcTlsError::encrypt("Encrypter is not in Init state."));
+        };
+
+        self.state = EncryptState::Prepared {
+            ghash,
+            keystream,
+            ghash_key,
+        };
+        Ok(())
+    }
+
+    pub async fn setup<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
+    where
+        Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+        Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+        Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+        Ctx: Context,
+    {
+        let EncryptState::Prepared {
+            mut ghash,
+            keystream,
+            ghash_key,
+        } = std::mem::replace(&mut self.state, EncryptState::Error)
+        else {
+            return Err(MpcTlsError::encrypt("Encrypter is not in Prepared state."));
+        };
+
+        let key = ghash_key.decode().await?;
+
+        ghash.set_key(key)?;
+        ghash.flush(ctx).await?;
+        let ghash = ghash.finalize()?;
+
+        let aes = AesGcmEncrypt::new(self.role, keystream, ghash);
+        self.state = EncryptState::Ready(aes);
+
+        Ok(())
+    }
+
     pub fn push(&mut self, encrypt: EncryptRecord) {
         self.queue.push(encrypt);
     }
@@ -35,6 +111,10 @@ impl Encrypter {
     where
         V: Vm<Binary> + View<Binary>,
     {
+        let EncryptState::Ready(ref mut aes) = self.state else {
+            return Err(MpcTlsError::encrypt("Encrypter is not in Ready state."));
+        };
+
         let encrypt_records = std::mem::take(&mut self.queue);
 
         let mut encrypts = Vec::with_capacity(encrypt_records.len());
@@ -74,9 +154,22 @@ impl Encrypter {
             encrypts.push(encrypt);
         }
 
-        let encrypt = self.aes.encrypt(vm, encrypts)?;
+        let encrypt = aes.encrypt(vm, encrypts)?;
         Ok(encrypt)
     }
+}
+
+enum EncryptState<Sc> {
+    Init {
+        ghash: Ghash<Sc>,
+    },
+    Prepared {
+        ghash: Ghash<Sc>,
+        keystream: Keystream<Aes128>,
+        ghash_key: OneTimePadShared,
+    },
+    Ready(AesGcmEncrypt),
+    Error,
 }
 
 struct EncryptRequest {
@@ -88,14 +181,84 @@ struct EncryptRequest {
     aad: [u8; 13],
 }
 
-pub(crate) struct Decrypter {
+pub(crate) struct Decrypter<Sc> {
     role: TlsRole,
     transcript: Transcript,
     queue: Vec<DecryptRecord>,
-    aes: AesGcmDecrypt,
+    state: DecryptState<Sc>,
 }
 
-impl Decrypter {
+impl<Sc> Decrypter<Sc> {
+    pub fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
+        Self {
+            role,
+            transcript: Transcript::default(),
+            queue: Vec::default(),
+            state: DecryptState::Init { ghash },
+        }
+    }
+
+    pub fn alloc(&mut self) -> Result<(), MpcTlsError>
+    where
+        Sc: ShareConvert<Gf2_128>,
+        Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+        Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+    {
+        let DecryptState::Init { ref mut ghash } = self.state else {
+            return Err(MpcTlsError::decrypt("Decrypter is not in Init state."));
+        };
+
+        ghash.alloc()?;
+        Ok(())
+    }
+
+    pub fn prepare(
+        &mut self,
+        keystream: Keystream<Aes128>,
+        ghash_key: OneTimePadShared,
+    ) -> Result<(), MpcTlsError> {
+        let DecryptState::Init { ghash, .. } =
+            std::mem::replace(&mut self.state, DecryptState::Error)
+        else {
+            return Err(MpcTlsError::decrypt("Decrypter is not in Init state."));
+        };
+
+        self.state = DecryptState::Prepared {
+            ghash,
+            keystream,
+            ghash_key,
+        };
+        Ok(())
+    }
+
+    pub async fn setup<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
+    where
+        Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+        Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+        Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+        Ctx: Context,
+    {
+        let DecryptState::Prepared {
+            mut ghash,
+            keystream,
+            ghash_key,
+        } = std::mem::replace(&mut self.state, DecryptState::Error)
+        else {
+            return Err(MpcTlsError::decrypt("Decrypter is not in Prepared state."));
+        };
+
+        let key = ghash_key.decode().await?;
+
+        ghash.set_key(key)?;
+        ghash.flush(ctx).await?;
+        let ghash = ghash.finalize()?;
+
+        let aes = AesGcmDecrypt::new(self.role, keystream, ghash);
+        self.state = DecryptState::Ready(aes);
+
+        Ok(())
+    }
+
     pub fn push(&mut self, decrypt: DecryptRecord) {
         self.queue.push(decrypt);
     }
@@ -104,6 +267,10 @@ impl Decrypter {
     where
         V: Vm<Binary> + View<Binary>,
     {
+        let DecryptState::Ready(ref mut aes) = self.state else {
+            return Err(MpcTlsError::decrypt("Decrypter is not in Ready state."));
+        };
+
         let decrypt_records = std::mem::take(&mut self.queue);
 
         let mut decrypts = Vec::with_capacity(decrypt_records.len());
@@ -143,7 +310,7 @@ impl Decrypter {
             decrypts.push(decrypt);
             typs.push(typ);
         }
-        let (decrypt, plaintext_refs) = self.aes.decrypt(vm, decrypts)?;
+        let (decrypt, plaintext_refs) = aes.decrypt(vm, decrypts)?;
 
         for (&typ, plaintext_ref) in typs.iter().zip(plaintext_refs) {
             self.transcript.record(typ, plaintext_ref);
@@ -151,6 +318,19 @@ impl Decrypter {
 
         Ok(decrypt)
     }
+}
+
+enum DecryptState<Sc> {
+    Init {
+        ghash: Ghash<Sc>,
+    },
+    Prepared {
+        ghash: Ghash<Sc>,
+        keystream: Keystream<Aes128>,
+        ghash_key: OneTimePadShared,
+    },
+    Ready(AesGcmDecrypt),
+    Error,
 }
 
 struct DecryptRequest {
