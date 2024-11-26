@@ -2,11 +2,11 @@ use crate::{
     decode::Decode,
     error::MpcTlsError,
     msg::{
-        ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, EncryptClientFinished,
-        MpcTlsMessage, ServerFinishedVd,
+        ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, EncryptAlert,
+        EncryptClientFinished, EncryptMessage, MpcTlsMessage, ServerFinishedVd,
     },
     record_layer::{aead::transmute, Decrypter, Encrypter},
-    Direction, MpcTlsChannel, MpcTlsLeaderConfig, TlsRole,
+    Direction, EncryptRecord, MpcTlsChannel, MpcTlsLeaderConfig, TlsRole, Visibility,
 };
 use async_trait::async_trait;
 use cipher::{aes::Aes128, Cipher};
@@ -33,7 +33,9 @@ use tls_core::{
     ke::ServerKxDetails,
     key::PublicKey,
     msgs::{
-        enums::{CipherSuite, ContentType, NamedGroup, ProtocolVersion},
+        alert::AlertMessagePayload,
+        codec::Codec,
+        enums::{AlertDescription, CipherSuite, ContentType, NamedGroup, ProtocolVersion},
         handshake::Random,
         message::{OpaqueMessage, PlainMessage},
     },
@@ -207,19 +209,38 @@ where
         Ctx: Context,
     {
         // TODO: Optimize this with ctx try join
-        self.encrypter.setup(ctx).await?;
-        self.decrypter.setup(ctx).await?;
+        self.encrypter.start(ctx).await?;
+        self.decrypter.start(ctx).await?;
 
         Ok(())
     }
 
-    /// Returns the number of bytes sent and received.
-    pub fn bytes_transferred(&self) -> (usize, usize) {
-        todo!()
-    }
-
     fn check_transcript_length(&self, direction: Direction, len: usize) -> Result<(), MpcTlsError> {
-        todo!()
+        match direction {
+            Direction::Sent => {
+                let new_len = self.encrypter.sent_bytes() + len;
+                let max_size = self.config.common().tx_config().max_online_size();
+                if new_len > max_size {
+                    return Err(MpcTlsError::config(format!(
+                        "max sent transcript size exceeded: {} > {}",
+                        new_len, max_size
+                    )));
+                }
+            }
+            Direction::Recv => {
+                let new_len = self.decrypter.recv_bytes() + len;
+                let max_size = self.config.common().rx_config().max_online_size()
+                    + self.config.common().rx_config().max_offline_size();
+                if new_len > max_size {
+                    return Err(MpcTlsError::config(format!(
+                        "max received transcript size exceeded: {} > {}",
+                        new_len, max_size
+                    )));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     #[instrument(level = "debug", skip_all, err)]
@@ -228,12 +249,21 @@ where
         msg: PlainMessage,
     ) -> Result<OpaqueMessage, MpcTlsError> {
         let Cf { data } = self.state.take().try_into_cf()?;
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
 
         self.channel
             .send(MpcTlsMessage::EncryptClientFinished(EncryptClientFinished))
             .await?;
 
-        let msg = self.encrypter.encrypt_public(msg).await?;
+        let msg = EncryptRecord {
+            msg,
+            visibility: Visibility::Public,
+        };
+
+        let msg = self.encrypter.encrypt(vm, msg)?;
+        let mut msg = msg.compute(ctx).await?;
+        let msg = msg.pop().expect("Encrypted messages should not be empty");
 
         self.state = State::Sf(Sf { data });
 
@@ -242,7 +272,37 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     async fn encrypt_alert(&mut self, msg: PlainMessage) -> Result<OpaqueMessage, MpcTlsError> {
-        todo!()
+        if let Some(alert) = AlertMessagePayload::read_bytes(&msg.payload.0) {
+            // We only allow CloseNotify alerts.
+            if alert.description != AlertDescription::CloseNotify {
+                return Err(MpcTlsError::other(
+                    "attempted to send an alert other than CloseNotify",
+                ));
+            }
+        } else {
+            return Err(MpcTlsError::other(
+                "attempted to send an alert other than CloseNotify",
+            ));
+        }
+
+        self.channel
+            .send(MpcTlsMessage::EncryptAlert(EncryptAlert {
+                msg: msg.payload.0.clone(),
+            }))
+            .await?;
+
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
+
+        let msg = EncryptRecord {
+            msg,
+            visibility: Visibility::Public,
+        };
+        let msg = self.encrypter.encrypt(vm, msg)?;
+        let mut msg = msg.compute(ctx).await?;
+        let msg = msg.pop().expect("Encrypted messages should not be empty");
+
+        Ok(msg)
     }
 
     #[instrument(level = "debug", skip_all, err)]
@@ -250,7 +310,27 @@ where
         &mut self,
         msg: PlainMessage,
     ) -> Result<OpaqueMessage, MpcTlsError> {
-        todo!()
+        self.state.try_as_active()?;
+        self.check_transcript_length(Direction::Sent, msg.payload.0.len())?;
+
+        self.channel
+            .send(MpcTlsMessage::EncryptMessage(EncryptMessage {
+                len: msg.payload.0.len(),
+            }))
+            .await?;
+
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
+
+        let msg = EncryptRecord {
+            msg,
+            visibility: Visibility::Private,
+        };
+        let msg = self.encrypter.encrypt(vm, msg)?;
+        let mut msg = msg.compute(ctx).await?;
+        let msg = msg.pop().expect("Encrypted messages should not be empty");
+
+        Ok(msg)
     }
 
     #[instrument(level = "debug", skip_all, err)]

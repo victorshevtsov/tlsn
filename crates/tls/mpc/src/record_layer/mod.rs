@@ -26,7 +26,7 @@ use aead::{ghash::Tag, AesGcmDecrypt, AesGcmEncrypt, Decrypt, Encrypt};
 
 use self::aead::ghash::Ghash;
 
-pub(crate) struct Encrypter<Sc> {
+pub struct Encrypter<Sc> {
     role: TlsRole,
     transcript: Transcript,
     queue: Vec<EncryptRecord>,
@@ -75,7 +75,12 @@ impl<Sc> Encrypter<Sc> {
         Ok(())
     }
 
-    pub async fn setup<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
+    /// Returns the number of sent bytes.
+    pub fn sent_bytes(&self) -> usize {
+        self.transcript.size()
+    }
+
+    pub async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
         Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
@@ -103,11 +108,11 @@ impl<Sc> Encrypter<Sc> {
         Ok(())
     }
 
-    pub fn push(&mut self, encrypt: EncryptRecord) {
+    pub fn enqueue(&mut self, encrypt: EncryptRecord) {
         self.queue.push(encrypt);
     }
 
-    fn encrypt<V>(&mut self, vm: &mut V) -> Result<Encrypt, MpcTlsError>
+    pub fn encrypt_all<V>(&mut self, vm: &mut V) -> Result<Encrypt, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
@@ -116,45 +121,73 @@ impl<Sc> Encrypter<Sc> {
         };
 
         let encrypt_records = std::mem::take(&mut self.queue);
-
         let mut encrypts = Vec::with_capacity(encrypt_records.len());
-        for record in encrypt_records {
-            let EncryptRecord { msg, visibility } = record;
 
-            let PlainMessage {
-                typ,
-                version,
-                payload,
-            } = msg;
-
-            let seq = self.transcript.seq();
-            let len = payload.0.len();
-            let explicit_nonce = seq.to_be_bytes();
-            let aad = make_tls12_aad(seq, typ, version, len);
-
-            let plaintext = payload.0;
-            let plaintext_ref: Vector<U8> = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
-            match visibility {
-                Visibility::Private => match self.role {
-                    TlsRole::Leader => vm.mark_private(plaintext_ref).map_err(MpcTlsError::vm)?,
-                    TlsRole::Follower => vm.mark_blind(plaintext_ref).map_err(MpcTlsError::vm)?,
-                },
-                Visibility::Public => vm.mark_public(plaintext_ref).map_err(MpcTlsError::vm)?,
-            }
-
-            self.transcript.record(typ, plaintext_ref);
-            let encrypt = EncryptRequest {
-                plaintext,
-                plaintext_ref,
-                typ,
-                version,
-                explicit_nonce,
-                aad,
-            };
+        for message in encrypt_records {
+            let encrypt = Self::encrypt_inner(self.role, vm, &mut self.transcript, message)?;
             encrypts.push(encrypt);
         }
 
         let encrypt = aes.encrypt(vm, encrypts)?;
+        Ok(encrypt)
+    }
+
+    pub fn encrypt<V>(&mut self, vm: &mut V, message: EncryptRecord) -> Result<Encrypt, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        let EncryptState::Ready(ref mut aes) = self.state else {
+            return Err(MpcTlsError::encrypt("Encrypter is not in Ready state."));
+        };
+
+        let encrypt = Self::encrypt_inner(self.role, vm, &mut self.transcript, message)?;
+        let encrypt = aes.encrypt(vm, vec![encrypt])?;
+
+        Ok(encrypt)
+    }
+
+    fn encrypt_inner<V>(
+        role: TlsRole,
+        vm: &mut V,
+        transcript: &mut Transcript,
+        message: EncryptRecord,
+    ) -> Result<EncryptRequest, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        let EncryptRecord { msg, visibility } = message;
+
+        let PlainMessage {
+            typ,
+            version,
+            payload,
+        } = msg;
+
+        let seq = transcript.seq();
+        let len = payload.0.len();
+        let explicit_nonce = seq.to_be_bytes();
+        let aad = make_tls12_aad(seq, typ, version, len);
+
+        let plaintext = payload.0;
+        let plaintext_ref: Vector<U8> = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
+        match visibility {
+            Visibility::Private => match role {
+                TlsRole::Leader => vm.mark_private(plaintext_ref).map_err(MpcTlsError::vm)?,
+                TlsRole::Follower => vm.mark_blind(plaintext_ref).map_err(MpcTlsError::vm)?,
+            },
+            Visibility::Public => vm.mark_public(plaintext_ref).map_err(MpcTlsError::vm)?,
+        }
+
+        transcript.record(typ, plaintext_ref);
+
+        let encrypt = EncryptRequest {
+            plaintext,
+            plaintext_ref,
+            typ,
+            version,
+            explicit_nonce,
+            aad,
+        };
         Ok(encrypt)
     }
 }
@@ -181,7 +214,7 @@ struct EncryptRequest {
     aad: [u8; 13],
 }
 
-pub(crate) struct Decrypter<Sc> {
+pub struct Decrypter<Sc> {
     role: TlsRole,
     transcript: Transcript,
     queue: Vec<DecryptRecord>,
@@ -212,6 +245,11 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
+    /// Returns the number of received bytes.
+    pub fn recv_bytes(&self) -> usize {
+        self.transcript.size()
+    }
+
     pub fn prepare(
         &mut self,
         keystream: Keystream<Aes128>,
@@ -231,7 +269,7 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
-    pub async fn setup<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
+    pub async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
         Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,

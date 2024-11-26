@@ -12,6 +12,12 @@ pub(crate) struct Transcript {
 }
 
 impl Transcript {
+    /// Records traffic bytes.
+    ///
+    /// # Arguments
+    ///
+    /// * `typ` - Content type of the TLS message.
+    /// * `traffic` - The byte references to the TLS traffic.
     pub(crate) fn record(&mut self, typ: ContentType, traffic: Vector<U8>) {
         self.seq += 1;
         if let ContentType::ApplicationData = typ {
@@ -20,14 +26,17 @@ impl Transcript {
         }
     }
 
+    /// Returns the current TLS sequence number.
     pub(crate) fn seq(&self) -> u64 {
         self.seq
     }
 
+    /// Returns the transcript size in bytes.
     pub(crate) fn size(&self) -> usize {
         self.size
     }
 
+    /// Returns the inner traffic bytes.
     pub(crate) fn into_inner(self) -> Vec<Vector<U8>> {
         self.bytes
     }
