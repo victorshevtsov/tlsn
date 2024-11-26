@@ -50,7 +50,7 @@ impl<Sc> Encrypter<Sc> {
         Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
     {
         let EncryptState::Init { ref mut ghash, .. } = self.state else {
-            return Err(MpcTlsError::encrypt("Encrypter is not in Init state."));
+            return Err(MpcTlsError::encrypt("Encrypter is not in Init state"));
         };
 
         ghash.alloc()?;
@@ -64,7 +64,7 @@ impl<Sc> Encrypter<Sc> {
     ) -> Result<(), MpcTlsError> {
         let EncryptState::Init { ghash } = std::mem::replace(&mut self.state, EncryptState::Error)
         else {
-            return Err(MpcTlsError::encrypt("Encrypter is not in Init state."));
+            return Err(MpcTlsError::encrypt("Encrypter is not in Init state"));
         };
 
         self.state = EncryptState::Prepared {
@@ -93,7 +93,7 @@ impl<Sc> Encrypter<Sc> {
             ghash_key,
         } = std::mem::replace(&mut self.state, EncryptState::Error)
         else {
-            return Err(MpcTlsError::encrypt("Encrypter is not in Prepared state."));
+            return Err(MpcTlsError::encrypt("Encrypter is not in Prepared state"));
         };
 
         let key = ghash_key.decode().await?;
@@ -117,7 +117,7 @@ impl<Sc> Encrypter<Sc> {
         V: Vm<Binary> + View<Binary>,
     {
         let EncryptState::Ready(ref mut aes) = self.state else {
-            return Err(MpcTlsError::encrypt("Encrypter is not in Ready state."));
+            return Err(MpcTlsError::encrypt("Encrypter is not in Ready state"));
         };
 
         let encrypt_records = std::mem::take(&mut self.queue);
@@ -137,7 +137,7 @@ impl<Sc> Encrypter<Sc> {
         V: Vm<Binary> + View<Binary>,
     {
         let EncryptState::Ready(ref mut aes) = self.state else {
-            return Err(MpcTlsError::encrypt("Encrypter is not in Ready state."));
+            return Err(MpcTlsError::encrypt("Encrypter is not in Ready state"));
         };
 
         let encrypt = Self::encrypt_inner(self.role, vm, &mut self.transcript, message)?;
@@ -238,7 +238,7 @@ impl<Sc> Decrypter<Sc> {
         Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
     {
         let DecryptState::Init { ref mut ghash } = self.state else {
-            return Err(MpcTlsError::decrypt("Decrypter is not in Init state."));
+            return Err(MpcTlsError::decrypt("Decrypter is not in Init state"));
         };
 
         ghash.alloc()?;
@@ -258,7 +258,7 @@ impl<Sc> Decrypter<Sc> {
         let DecryptState::Init { ghash, .. } =
             std::mem::replace(&mut self.state, DecryptState::Error)
         else {
-            return Err(MpcTlsError::decrypt("Decrypter is not in Init state."));
+            return Err(MpcTlsError::decrypt("Decrypter is not in Init state"));
         };
 
         self.state = DecryptState::Prepared {
@@ -282,7 +282,7 @@ impl<Sc> Decrypter<Sc> {
             ghash_key,
         } = std::mem::replace(&mut self.state, DecryptState::Error)
         else {
-            return Err(MpcTlsError::decrypt("Decrypter is not in Prepared state."));
+            return Err(MpcTlsError::decrypt("Decrypter is not in Prepared state"));
         };
 
         let key = ghash_key.decode().await?;
@@ -297,16 +297,16 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
-    pub fn push(&mut self, decrypt: DecryptRecord) {
+    pub fn enqueue(&mut self, decrypt: DecryptRecord) {
         self.queue.push(decrypt);
     }
 
-    fn decrypt<V>(&mut self, vm: &mut V) -> Result<Decrypt, MpcTlsError>
+    pub fn decrypt_all<V>(&mut self, vm: &mut V) -> Result<Decrypt, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
     {
         let DecryptState::Ready(ref mut aes) = self.state else {
-            return Err(MpcTlsError::decrypt("Decrypter is not in Ready state."));
+            return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
         };
 
         let decrypt_records = std::mem::take(&mut self.queue);
@@ -314,36 +314,8 @@ impl<Sc> Decrypter<Sc> {
         let mut decrypts = Vec::with_capacity(decrypt_records.len());
         let mut typs = Vec::with_capacity(decrypt_records.len());
 
-        for record in decrypt_records {
-            let DecryptRecord { msg, visibility } = record;
-
-            let OpaqueMessage {
-                typ,
-                version,
-                payload,
-            } = msg;
-
-            let mut ciphertext = payload.0;
-
-            let seq = self.transcript.seq();
-            let explicit_nonce: [u8; 8] = ciphertext
-                .drain(..8)
-                .collect::<Vec<u8>>()
-                .try_into()
-                .expect("Should be able to drain explicit nonce");
-            let purported_tag = Tag::new(ciphertext.split_off(ciphertext.len() - 16));
-            let len = ciphertext.len();
-            let aad = make_tls12_aad(seq, typ, version, len);
-
-            let decrypt = DecryptRequest {
-                ciphertext,
-                typ,
-                visibility,
-                version,
-                explicit_nonce,
-                aad,
-                purported_tag,
-            };
+        for message in decrypt_records {
+            let (decrypt, typ) = Self::decrypt_inner(&mut self.transcript, message)?;
 
             decrypts.push(decrypt);
             typs.push(typ);
@@ -355,6 +327,84 @@ impl<Sc> Decrypter<Sc> {
         }
 
         Ok(decrypt)
+    }
+
+    pub fn decrypt<V>(&mut self, vm: &mut V, message: DecryptRecord) -> Result<Decrypt, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        let DecryptState::Ready(ref mut aes) = self.state else {
+            return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
+        };
+        let (decrypt, typ) = Self::decrypt_inner(&mut self.transcript, message)?;
+        let (decrypt, mut plaintext_refs) = aes.decrypt(vm, vec![decrypt])?;
+
+        let plaintext_ref = plaintext_refs
+            .pop()
+            .expect("Plaintext references should not be empty");
+
+        self.transcript.record(typ, plaintext_ref);
+        Ok(decrypt)
+    }
+
+    fn decrypt_inner(
+        transcript: &mut Transcript,
+        message: DecryptRecord,
+    ) -> Result<(DecryptRequest, ContentType), MpcTlsError> {
+        let DecryptRecord { msg, visibility } = message;
+
+        let OpaqueMessage {
+            typ,
+            version,
+            payload,
+        } = msg;
+
+        let mut ciphertext = payload.0;
+
+        let seq = transcript.seq();
+        let explicit_nonce: [u8; 8] = ciphertext
+            .drain(..8)
+            .collect::<Vec<u8>>()
+            .try_into()
+            .expect("Should be able to drain explicit nonce");
+        let purported_tag = Tag::new(ciphertext.split_off(ciphertext.len() - 16));
+        let len = ciphertext.len();
+        let aad = make_tls12_aad(seq, typ, version, len);
+
+        let decrypt = DecryptRequest {
+            ciphertext,
+            typ,
+            visibility,
+            version,
+            explicit_nonce,
+            aad,
+            purported_tag,
+        };
+        Ok((decrypt, typ))
+    }
+
+    /// Proves the plaintext of the message to the other party
+    ///
+    /// This verifies the tag of the message and locally decrypts it. Then, this
+    /// party commits to the plaintext and proves it encrypts back to the
+    /// ciphertext.
+    pub(crate) async fn prove_plaintext(
+        &mut self,
+        _msg: OpaqueMessage,
+    ) -> Result<PlainMessage, MpcTlsError> {
+        todo!()
+    }
+
+    /// Verifies the plaintext of the message
+    ///
+    /// This verifies the tag of the message then has the other party decrypt
+    /// it. Then, the other party commits to the plaintext and proves it
+    /// encrypts back to the ciphertext.
+    pub(crate) async fn verify_plaintext(
+        &mut self,
+        _msg: OpaqueMessage,
+    ) -> Result<(), MpcTlsError> {
+        todo!()
     }
 }
 
@@ -379,22 +429,4 @@ struct DecryptRequest {
     explicit_nonce: [u8; 8],
     aad: [u8; 13],
     purported_tag: Tag,
-}
-
-/// Proves the plaintext of the message to the other party
-///
-/// This verifies the tag of the message and locally decrypts it. Then, this
-/// party commits to the plaintext and proves it encrypts back to the
-/// ciphertext.
-pub(crate) async fn prove_plaintext(_msg: OpaqueMessage) -> Result<PlainMessage, MpcTlsError> {
-    todo!()
-}
-
-/// Verifies the plaintext of the message
-///
-/// This verifies the tag of the message then has the other party decrypt
-/// it. Then, the other party commits to the plaintext and proves it
-/// encrypts back to the ciphertext.
-pub(crate) async fn verify_plaintext(_msg: OpaqueMessage) -> Result<(), MpcTlsError> {
-    todo!()
 }

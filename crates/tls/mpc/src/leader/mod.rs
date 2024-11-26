@@ -2,11 +2,13 @@ use crate::{
     decode::Decode,
     error::MpcTlsError,
     msg::{
-        ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, EncryptAlert,
-        EncryptClientFinished, EncryptMessage, MpcTlsMessage, ServerFinishedVd,
+        ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, DecryptAlert, DecryptMessage,
+        DecryptServerFinished, EncryptAlert, EncryptClientFinished, EncryptMessage, MpcTlsMessage,
+        ServerFinishedVd,
     },
     record_layer::{aead::transmute, Decrypter, Encrypter},
-    Direction, EncryptRecord, MpcTlsChannel, MpcTlsLeaderConfig, TlsRole, Visibility,
+    DecryptRecord, Direction, EncryptRecord, MpcTlsChannel, MpcTlsLeaderConfig, TlsRole,
+    Visibility,
 };
 use async_trait::async_trait;
 use cipher::{aes::Aes128, Cipher};
@@ -285,14 +287,14 @@ where
             ));
         }
 
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
+
         self.channel
             .send(MpcTlsMessage::EncryptAlert(EncryptAlert {
                 msg: msg.payload.0.clone(),
             }))
             .await?;
-
-        let vm = &mut self.vm;
-        let ctx = &mut self.ctx;
 
         let msg = EncryptRecord {
             msg,
@@ -313,14 +315,14 @@ where
         self.state.try_as_active()?;
         self.check_transcript_length(Direction::Sent, msg.payload.0.len())?;
 
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
+
         self.channel
             .send(MpcTlsMessage::EncryptMessage(EncryptMessage {
                 len: msg.payload.0.len(),
             }))
             .await?;
-
-        let vm = &mut self.vm;
-        let ctx = &mut self.ctx;
 
         let msg = EncryptRecord {
             msg,
@@ -338,12 +340,60 @@ where
         &mut self,
         msg: OpaqueMessage,
     ) -> Result<PlainMessage, MpcTlsError> {
-        todo!()
+        let Sf { data } = self.state.take().try_into_sf()?;
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
+
+        self.channel
+            .send(MpcTlsMessage::DecryptServerFinished(
+                DecryptServerFinished {
+                    ciphertext: msg.payload.0.clone(),
+                },
+            ))
+            .await?;
+
+        let msg = DecryptRecord {
+            msg,
+            visibility: Visibility::Public,
+        };
+
+        let msg = self.decrypter.decrypt(vm, msg)?;
+        let mut msg = msg.compute(ctx).await?;
+        let msg = msg
+            .pop()
+            .expect("Decrypted messages should not be empty")
+            .expect("Leader should recieve some message");
+
+        self.state = State::Active(Active { data });
+
+        Ok(msg)
     }
 
     #[instrument(level = "debug", skip_all, err)]
     async fn decrypt_alert(&mut self, msg: OpaqueMessage) -> Result<PlainMessage, MpcTlsError> {
-        todo!()
+        self.state.try_as_active()?;
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
+
+        self.channel
+            .send(MpcTlsMessage::DecryptAlert(DecryptAlert {
+                ciphertext: msg.payload.0.clone(),
+            }))
+            .await?;
+
+        let msg = DecryptRecord {
+            msg,
+            visibility: Visibility::Public,
+        };
+
+        let msg = self.decrypter.decrypt(vm, msg)?;
+        let mut msg = msg.compute(ctx).await?;
+        let msg = msg
+            .pop()
+            .expect("Decrypted messages should not be empty")
+            .expect("Leader should recieve some message");
+
+        Ok(msg)
     }
 
     #[instrument(level = "debug", skip_all, err)]
@@ -351,7 +401,37 @@ where
         &mut self,
         msg: OpaqueMessage,
     ) -> Result<PlainMessage, MpcTlsError> {
-        todo!()
+        self.state.try_as_active()?;
+        self.check_transcript_length(Direction::Recv, msg.payload.0.len())?;
+
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
+
+        self.channel
+            .send(MpcTlsMessage::DecryptMessage(DecryptMessage))
+            .await?;
+
+        let msg = if self.committed {
+            // At this point the AEAD key was revealed to us. We will locally decrypt the
+            // TLS message and will prove the knowledge of the plaintext to the
+            // follower.
+            self.decrypter.prove_plaintext(msg).await?
+        } else {
+            let msg = DecryptRecord {
+                msg,
+                visibility: Visibility::Private,
+            };
+
+            let msg = self.decrypter.decrypt(vm, msg)?;
+            let mut msg = msg.compute(ctx).await?;
+            let msg = msg
+                .pop()
+                .expect("Decrypted messages should not be empty")
+                .expect("Leader should recieve some message");
+            msg
+        };
+
+        Ok(msg)
     }
 
     #[instrument(level = "debug", skip_all, err)]
