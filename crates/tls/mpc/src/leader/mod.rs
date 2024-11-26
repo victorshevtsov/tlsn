@@ -204,19 +204,6 @@ where
         Ok(())
     }
 
-    #[instrument(level = "debug", skip_all, err)]
-    async fn start(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
-    where
-        C: Cipher<Aes128, V>,
-        Ctx: Context,
-    {
-        // TODO: Optimize this with ctx try join
-        self.encrypter.start(ctx).await?;
-        self.decrypter.start(ctx).await?;
-
-        Ok(())
-    }
-
     fn check_transcript_length(&self, direction: Direction, len: usize) -> Result<(), MpcTlsError> {
         match direction {
             Direction::Sent => {
@@ -741,7 +728,16 @@ where
             .map_err(|err| BackendError::Prf(err.to_string()))?;
 
         // Set ghash keys
-        // futures::try_join!(self.encrypter.start(), self.decrypter.start())?;
+        // TODO: Optimize this with ctx try join
+        let ctx = &mut self.ctx;
+        self.encrypter
+            .start(ctx)
+            .await
+            .map_err(|err| BackendError::InternalError(err.to_string()))?;
+        self.decrypter
+            .start(ctx)
+            .await
+            .map_err(|err| BackendError::InternalError(err.to_string()))?;
 
         self.state = State::Cf(Cf {
             data: MpcTlsData {
