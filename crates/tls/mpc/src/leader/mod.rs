@@ -2,9 +2,9 @@ use crate::{
     decode::Decode,
     error::MpcTlsError,
     msg::{
-        ClientFinishedVd, Commit, CommitMessage, ComputeKeyExchange, DecryptAlert, DecryptMessage,
-        DecryptServerFinished, EncryptAlert, EncryptClientFinished, EncryptMessage, MpcTlsMessage,
-        ServerFinishedVd,
+        ClientFinishedVd, CloseConnection, Commit, CommitMessage, ComputeKeyExchange, DecryptAlert,
+        DecryptMessage, DecryptServerFinished, EncryptAlert, EncryptClientFinished, EncryptMessage,
+        MpcTlsMessage, ServerFinishedVd,
     },
     record_layer::{aead::transmute, Decrypter, Encrypter},
     DecryptRecord, Direction, EncryptRecord, MpcTlsChannel, MpcTlsLeaderConfig, TlsRole,
@@ -82,7 +82,7 @@ where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
     P: Prf<V> + Send + Flush<Ctx>,
-    C: Send,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
     Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
@@ -124,10 +124,7 @@ where
 
     /// Performs any one-time setup operations.
     #[instrument(level = "debug", skip_all, err)]
-    pub async fn setup(&mut self) -> Result<(), MpcTlsError>
-    where
-        C: Cipher<Aes128, V>,
-    {
+    pub async fn setup(&mut self) -> Result<(), MpcTlsError> {
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
         let role = TlsRole::Leader;
@@ -435,8 +432,7 @@ where
         self.committed = true;
 
         if !self.buffer.is_empty() {
-            // TODO
-            // self.decrypter.decode_key_private().await?;
+            self.decode_key().await?;
             self.is_decrypting = true;
             self.notifier.set();
         }
@@ -450,7 +446,19 @@ where
         &mut self,
         ctx: &mut LudiContext<Self>,
     ) -> Result<(), MpcTlsError> {
-        todo!()
+        debug!("closing connection");
+
+        self.channel
+            .send(MpcTlsMessage::CloseConnection(CloseConnection))
+            .await?;
+
+        let Active { data } = self.state.take().try_into_active()?;
+
+        self.state = State::Closed(Closed { data });
+
+        ctx.stop();
+
+        Ok(())
     }
 
     /// Defers decryption of any incoming messages.
@@ -465,11 +473,17 @@ where
         Ok(())
     }
 
-    pub(crate) async fn decode_key_private() -> Result<(), MpcTlsError> {
-        todo!()
-    }
+    pub async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
+        let role = TlsRole::Leader;
+        let vm = &mut self.vm;
 
-    pub(crate) async fn decode_key_blind() -> Result<(), MpcTlsError> {
+        let key = self.cipher.key().map_err(MpcTlsError::cipher)?;
+        let key = transmute(key);
+        let key = Decode::new(vm, role, key)?.private(vm)?;
+        let key = key.decode().await?.expect("Leader shoule get some key");
+
+        // TODO: Decide where to put the key now.
+
         todo!()
     }
 }
@@ -480,7 +494,7 @@ where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
     P: Prf<V> + Send + Flush<Ctx>,
-    C: Send,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
     Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,

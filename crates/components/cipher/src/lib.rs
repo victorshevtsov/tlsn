@@ -38,6 +38,12 @@ pub trait Cipher<C: CipherCircuit, V: Vm<Binary>> {
     /// Sets the initialization vector.
     fn set_iv(&mut self, iv: <C as CipherCircuit>::Iv);
 
+    /// Returns the key reference.
+    fn key(&self) -> Result<<C as CipherCircuit>::Key, Self::Error>;
+
+    /// Returns the iv reference.
+    fn iv(&self) -> Result<<C as CipherCircuit>::Iv, Self::Error>;
+
     /// Computes the [`Keystream`].
     ///
     /// # Arguments

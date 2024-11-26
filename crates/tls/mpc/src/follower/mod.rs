@@ -445,6 +445,10 @@ impl MpcTlsFollower {
 
         Ok(())
     }
+
+    pub(crate) async fn decode_key() -> Result<(), MpcTlsError> {
+        todo!()
+    }
 }
 
 /// Data collected by the MPC-TLS follower.

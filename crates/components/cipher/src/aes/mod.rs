@@ -31,18 +31,6 @@ impl Debug for MpcAes {
 }
 
 impl MpcAes {
-    /// Returns the key reference.
-    pub fn key(&self) -> Result<<Aes128 as CipherCircuit>::Key, AesError> {
-        self.key
-            .ok_or_else(|| AesError::new(ErrorKind::Key, "key not set"))
-    }
-
-    /// Returns the iv reference.
-    pub fn iv(&self) -> Result<<Aes128 as CipherCircuit>::Iv, AesError> {
-        self.iv
-            .ok_or_else(|| AesError::new(ErrorKind::Iv, "iv not set"))
-    }
-
     fn alloc_public<R, V>(vm: &mut V) -> Result<R, AesError>
     where
         R: Repr<Binary> + StaticSize<Binary> + Copy,
@@ -74,9 +62,19 @@ where
         self.iv = Some(iv);
     }
 
+    fn key(&self) -> Result<<Aes128 as CipherCircuit>::Key, Self::Error> {
+        self.key
+            .ok_or_else(|| AesError::new(ErrorKind::Key, "key not set"))
+    }
+
+    fn iv(&self) -> Result<<Aes128 as CipherCircuit>::Iv, Self::Error> {
+        self.iv
+            .ok_or_else(|| AesError::new(ErrorKind::Iv, "iv not set"))
+    }
+
     fn alloc(&self, vm: &mut V, block_count: usize) -> Result<Keystream<Aes128>, Self::Error> {
-        let key = self.key()?;
-        let iv = self.iv()?;
+        let key = <Self as Cipher<Aes128, V>>::key(self)?;
+        let iv = <Self as Cipher<Aes128, V>>::iv(self)?;
 
         let mut keystream = Keystream::<Aes128>::default();
         let mut circuits = VecDeque::with_capacity(block_count);
@@ -119,7 +117,7 @@ where
         input_ref: <Aes128 as CipherCircuit>::Block,
         input: <<Aes128 as CipherCircuit>::Block as Repr<Binary>>::Clear,
     ) -> Result<<Aes128 as CipherCircuit>::Block, Self::Error> {
-        let key = self.key()?;
+        let key = <Self as Cipher<Aes128, V>>::key(self)?;
 
         vm.assign(input_ref, input)
             .map_err(|err| AesError::new(ErrorKind::Vm, err))?;
