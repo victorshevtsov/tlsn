@@ -25,7 +25,7 @@ use tls_core::{
 pub(crate) mod aead;
 use aead::{
     ghash::{Ghash, Tag},
-    AesGcmDecrypt, AesGcmEncrypt, Decrypt, Encrypt,
+    AesGcmDecrypt, AesGcmEncrypt,
 };
 
 pub struct Encrypter<Sc> {
@@ -135,13 +135,8 @@ impl<Sc> Encrypter<Sc> {
             encrypts.push(encrypt);
         }
 
-        let encrypt = aes.encrypt(vm, encrypts)?;
+        let messages = aes.encrypt(vm, ctx, encrypts).await?;
 
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-
-        let messages = encrypt.compute(ctx).await?;
         Ok(messages)
     }
 
@@ -161,13 +156,7 @@ impl<Sc> Encrypter<Sc> {
 
         let encrypt = Self::prepare_encrypt(self.role, vm, &mut self.transcript, message)?;
 
-        let encrypt = aes.encrypt(vm, vec![encrypt])?;
-
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-
-        let mut message = encrypt.compute(ctx).await?;
+        let mut message = aes.encrypt(vm, ctx, vec![encrypt]).await?;
         let message = message
             .pop()
             .expect("Should contain at least one opaque message");
@@ -363,17 +352,14 @@ impl<Sc> Decrypter<Sc> {
             decrypts.push(decrypt);
             typs.push(typ);
         }
-        let key_and_iv = match (self.key.clone(), self.iv.clone()) {
-            (Some(key), Some(iv)) => Some((key, iv)),
-            _ => None,
-        };
-        let (decrypt, plaintext_refs) = aes.decrypt(vm, key_and_iv, decrypts)?;
 
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        let (messages, plaintext_refs) =
+            if let (Some(key), Some(iv)) = (self.key.clone(), self.iv.clone()) {
+                aes.decrypt_local(vm, ctx, key, iv, decrypts).await?
+            } else {
+                aes.decrypt(vm, ctx, decrypts).await?
+            };
 
-        let messages = decrypt.compute(ctx).await?;
         //TODO: Prove that plaintext encrypts to ciphertext
 
         for (&typ, plaintext_ref) in typs.iter().zip(plaintext_refs) {
@@ -398,22 +384,19 @@ impl<Sc> Decrypter<Sc> {
         };
         let (decrypt, typ) = Self::prepare_decrypt(&mut self.transcript, message)?;
 
-        let key_and_iv = match (self.key.clone(), self.iv.clone()) {
-            (Some(key), Some(iv)) => Some((key, iv)),
-            _ => None,
-        };
-        let (decrypt, mut plaintext_refs) = aes.decrypt(vm, key_and_iv, vec![decrypt])?;
+        let (messages, mut plaintext_refs) =
+            if let (Some(key), Some(iv)) = (self.key.clone(), self.iv.clone()) {
+                aes.decrypt_local(vm, ctx, key, iv, vec![decrypt]).await?
+            } else {
+                aes.decrypt(vm, ctx, vec![decrypt]).await?
+            };
+
         let plaintext_ref = plaintext_refs
             .pop()
             .expect("Plaintext references should not be empty");
 
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-
-        let message = decrypt.compute(ctx).await?;
         let message =
-            message.map(|mut m| m.pop().expect("Should contain at least one opaque message"));
+            messages.map(|mut m| m.pop().expect("Should contain at least one opaque message"));
 
         //TODO: Prove that plaintext encrypts to ciphertext
 

@@ -6,9 +6,9 @@ use mpz_memory_core::{
 };
 
 pub(crate) mod decrypt;
-pub(crate) use decrypt::{AesGcmDecrypt, Decrypt};
+pub(crate) use decrypt::AesGcmDecrypt;
 pub(crate) mod encrypt;
-pub(crate) use encrypt::{AesGcmEncrypt, Encrypt};
+pub(crate) use encrypt::AesGcmEncrypt;
 
 pub(crate) mod ghash;
 

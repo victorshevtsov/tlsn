@@ -14,7 +14,7 @@ use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
 use mpz_common::Context;
 use mpz_core::bitvec::BitVec;
 use mpz_memory_core::{binary::Binary, DecodeFutureTyped, Memory, MemoryExt, View};
-use mpz_vm_core::Vm;
+use mpz_vm_core::{Execute, Vm};
 use tls_core::msgs::{
     base::Payload,
     enums::{ContentType, ProtocolVersion},
@@ -44,23 +44,26 @@ impl AesGcmEncrypt {
         }
     }
 
-    /// Preparation for encrypting a ciphertext.
+    /// Encrypts a plaintext.
     ///
     /// Returns [`Encrypt`].
     ///
     /// # Arguments
     ///
     /// * `vm` - A virtual machine for 2PC.
+    /// * `ctx` - The context for IO.
     /// * `requests` - Encryption requests.
     #[allow(clippy::type_complexity)]
     #[instrument(level = "trace", skip_all, err)]
-    pub(crate) fn encrypt<V>(
+    pub(crate) async fn encrypt<V, Ctx>(
         &mut self,
         vm: &mut V,
+        ctx: &mut Ctx,
         requests: Vec<EncryptRequest>,
-    ) -> Result<Encrypt, MpcTlsError>
+    ) -> Result<Vec<OpaqueMessage>, MpcTlsError>
     where
-        V: Vm<Binary> + Memory<Binary> + View<Binary>,
+        V: Vm<Binary> + Memory<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
     {
         let len = requests.len();
         let mut encrypt = Encrypt::new(self.ghash.clone(), len);
@@ -90,12 +93,19 @@ impl AesGcmEncrypt {
             let ciphertext = vm.decode(cipher_ref).map_err(MpcTlsError::decode)?;
             encrypt.push(j0, explicit_nonce, ciphertext, typ, version, aad);
         }
-        Ok(encrypt)
+
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        let messages = encrypt.compute(ctx).await?;
+
+        Ok(messages)
     }
 }
 
 /// A struct for encryption operations.
-pub(crate) struct Encrypt {
+struct Encrypt {
     ghash: GhashCompute,
     j0s: Vec<OneTimePadShared>,
     explicit_nonces: Vec<[u8; 8]>,
@@ -107,7 +117,7 @@ pub(crate) struct Encrypt {
 
 impl Encrypt {
     /// Creates a new instance.
-    pub(crate) fn new(ghash: GhashCompute, cap: usize) -> Self {
+    fn new(ghash: GhashCompute, cap: usize) -> Self {
         Self {
             ghash,
             j0s: Vec::with_capacity(cap),
@@ -120,7 +130,7 @@ impl Encrypt {
     }
 
     /// Adds an encrypt operation.
-    pub(crate) fn push(
+    fn push(
         &mut self,
         j0: OneTimePadShared,
         explicit_nonce: [u8; 8],
@@ -138,7 +148,7 @@ impl Encrypt {
     }
 
     /// Returns the number of records this instance will encrypt.
-    pub(crate) fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.ciphertexts.len()
     }
 
@@ -148,7 +158,7 @@ impl Encrypt {
     ///
     /// * `ctx` - The context for IO.
     #[instrument(level = "trace", skip_all, err)]
-    pub(crate) async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Vec<OpaqueMessage>, MpcTlsError>
+    async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Vec<OpaqueMessage>, MpcTlsError>
     where
         Ctx: Context,
     {

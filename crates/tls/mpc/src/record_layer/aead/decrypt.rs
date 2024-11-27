@@ -17,7 +17,7 @@ use mpz_memory_core::{
     binary::{Binary, U8},
     DecodeFutureTyped, MemoryExt, Vector, View, ViewExt,
 };
-use mpz_vm_core::Vm;
+use mpz_vm_core::{Execute, Vm};
 use tls_core::msgs::{
     base::Payload,
     enums::{ContentType, ProtocolVersion},
@@ -47,23 +47,25 @@ impl AesGcmDecrypt {
         }
     }
 
-    /// Preparation for decrypting a ciphertext.
+    /// Decrypts a ciphertext.
     ///
     /// Returns [`Decrypt`] and plaintext refs.
     ///
     /// # Arguments
     ///
     /// * `vm` - A virtual machine for 2PC.
+    /// * `ctx` - The context for IO.
     /// * `requests` - Decryption requests.
     #[instrument(level = "trace", skip_all, err)]
-    pub(crate) fn decrypt<V>(
+    pub(crate) async fn decrypt<V, Ctx>(
         &mut self,
         vm: &mut V,
-        key_and_iv: Option<(Vec<u8>, Vec<u8>)>,
+        ctx: &mut Ctx,
         requests: Vec<DecryptRequest>,
-    ) -> Result<(Decrypt, Vec<Vector<U8>>), MpcTlsError>
+    ) -> Result<(Option<Vec<PlainMessage>>, Vec<Vector<U8>>), MpcTlsError>
     where
-        V: Vm<Binary> + View<Binary>,
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
     {
         let len = requests.len();
         let mut decrypt = Decrypt::new(self.role, self.ghash.clone(), len);
@@ -105,25 +107,36 @@ impl AesGcmDecrypt {
             decrypt.push(j0, ciphertext, decode, typ, version, aad, purported_tag);
         }
 
-        Ok((decrypt, plaintext_refs))
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        let messages = decrypt.compute(ctx).await?;
+
+        Ok((messages, plaintext_refs))
     }
 
-    /// Preparation for locally decrypting a ciphertext.
+    /// Decrypts a ciphertext locally.
     ///
     /// Returns [`DecryptLocal`].
     ///
     /// # Arguments
     ///
     /// * `vm` - A virtual machine for 2PC.
+    /// * `ctx` - The context for IO.
     /// * `requests` - Decryption requests.
     #[instrument(level = "trace", skip_all, err)]
-    pub(crate) fn decrypt_local<V>(
+    pub(crate) async fn decrypt_local<V, Ctx>(
         &mut self,
         vm: &mut V,
+        ctx: &mut Ctx,
+        key: Vec<u8>,
+        iv: Vec<u8>,
         requests: Vec<DecryptRequest>,
-    ) -> Result<DecryptLocal, MpcTlsError>
+    ) -> Result<(Option<Vec<PlainMessage>>, Vec<Vector<U8>>), MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
+        Ctx: Context,
     {
         todo!()
     }
@@ -144,7 +157,7 @@ pub(crate) struct Decrypt {
 
 impl Decrypt {
     /// Creates a new instance.
-    pub(crate) fn new(role: TlsRole, ghash: GhashCompute, cap: usize) -> Self {
+    fn new(role: TlsRole, ghash: GhashCompute, cap: usize) -> Self {
         Self {
             role,
             ghash,
@@ -159,7 +172,7 @@ impl Decrypt {
     }
 
     /// Adds a decrypt operation.
-    pub(crate) fn push(
+    fn push(
         &mut self,
         j0: OneTimePadShared,
         ciphertext: Vec<u8>,
@@ -179,7 +192,7 @@ impl Decrypt {
     }
 
     /// Returns the number of records this instance will decrypt.
-    pub(crate) fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.ciphertexts.len()
     }
 
@@ -188,10 +201,7 @@ impl Decrypt {
     /// # Arguments
     ///
     /// * `ctx` - The context for IO.
-    pub(crate) async fn compute<Ctx>(
-        self,
-        ctx: &mut Ctx,
-    ) -> Result<Option<Vec<PlainMessage>>, MpcTlsError>
+    async fn compute<Ctx>(self, ctx: &mut Ctx) -> Result<Option<Vec<PlainMessage>>, MpcTlsError>
     where
         Ctx: Context,
     {
