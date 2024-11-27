@@ -1,8 +1,8 @@
 //! TLS record layer.
 
 use crate::{
-    decode::OneTimePadShared, transcript::Transcript, DecryptRecord, EncryptRecord, MpcTlsError,
-    TlsRole, Visibility,
+    decode::OneTimePadShared, transcript::Transcript, DecryptRecord, EncryptInfo, EncryptRecord,
+    MpcTlsError, TlsRole, Visibility,
 };
 use cipher::{aes::Aes128, Keystream};
 use mpz_circuits::types::ToBinaryRepr;
@@ -31,7 +31,6 @@ use aead::{
 pub struct Encrypter<Sc> {
     role: TlsRole,
     transcript: Transcript,
-    queue: Vec<EncryptRecord>,
     state: EncryptState<Sc>,
 }
 
@@ -40,7 +39,6 @@ impl<Sc> Encrypter<Sc> {
         Self {
             role,
             transcript: Transcript::default(),
-            queue: Vec::default(),
             state: EncryptState::Init { ghash },
         }
     }
@@ -110,36 +108,6 @@ impl<Sc> Encrypter<Sc> {
         Ok(())
     }
 
-    pub fn enqueue(&mut self, encrypt: EncryptRecord) {
-        self.queue.push(encrypt);
-    }
-
-    pub async fn encrypt_all<V, Ctx>(
-        &mut self,
-        vm: &mut V,
-        ctx: &mut Ctx,
-    ) -> Result<Vec<OpaqueMessage>, MpcTlsError>
-    where
-        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
-        Ctx: Context,
-    {
-        let EncryptState::Ready(ref mut aes) = self.state else {
-            return Err(MpcTlsError::encrypt("Encrypter is not in Ready state"));
-        };
-
-        let encrypt_records = std::mem::take(&mut self.queue);
-        let mut encrypts = Vec::with_capacity(encrypt_records.len());
-
-        for message in encrypt_records {
-            let encrypt = Self::prepare_encrypt(self.role, vm, &mut self.transcript, message)?;
-            encrypts.push(encrypt);
-        }
-
-        let messages = aes.encrypt(vm, ctx, encrypts).await?;
-
-        Ok(messages)
-    }
-
     pub async fn encrypt<V, Ctx>(
         &mut self,
         vm: &mut V,
@@ -173,20 +141,30 @@ impl<Sc> Encrypter<Sc> {
     where
         V: Vm<Binary> + View<Binary>,
     {
-        let EncryptRecord { msg, visibility } = message;
+        let EncryptRecord {
+            info: msg,
+            visibility,
+        } = message;
 
-        let PlainMessage {
-            typ,
-            version,
-            payload,
-        } = msg;
+        let (len, plaintext, typ, version) = match msg {
+            EncryptInfo::Message(msg) => (
+                msg.payload.0.len(),
+                Some(msg.payload.0),
+                msg.typ,
+                msg.version,
+            ),
+            EncryptInfo::Length(len) => (
+                len,
+                None,
+                ContentType::ApplicationData,
+                ProtocolVersion::TLSv1_2,
+            ),
+        };
 
         let seq = transcript.inc_seq();
-        let len = payload.0.len();
         let explicit_nonce = seq.to_be_bytes();
         let aad = make_tls12_aad(seq, typ, version, len);
 
-        let plaintext = payload.0;
         let plaintext_ref: Vector<U8> = vm.alloc_vec(len).map_err(MpcTlsError::vm)?;
         match visibility {
             Visibility::Private => match role {
@@ -224,7 +202,7 @@ enum EncryptState<Sc> {
 }
 
 struct EncryptRequest {
-    plaintext: Vec<u8>,
+    plaintext: Option<Vec<u8>>,
     plaintext_ref: Vector<U8>,
     typ: ContentType,
     version: ProtocolVersion,

@@ -7,8 +7,8 @@ use crate::{
         MpcTlsMessage, ServerFinishedVd,
     },
     record_layer::{aead::transmute, Decrypter, Encrypter},
-    DecryptRecord, Direction, EncryptRecord, MpcTlsChannel, MpcTlsLeaderConfig, TlsRole,
-    Visibility,
+    DecryptRecord, Direction, EncryptInfo, EncryptRecord, MpcTlsChannel, MpcTlsLeaderConfig,
+    TlsRole, Visibility,
 };
 use async_trait::async_trait;
 use cipher::{aes::Aes128, Cipher};
@@ -244,7 +244,7 @@ where
             .await?;
 
         let msg = EncryptRecord {
-            msg,
+            info: EncryptInfo::Message(msg),
             visibility: Visibility::Public,
         };
 
@@ -280,7 +280,7 @@ where
             .await?;
 
         let msg = EncryptRecord {
-            msg,
+            info: EncryptInfo::Message(msg),
             visibility: Visibility::Public,
         };
         let msg = self.encrypter.encrypt(vm, ctx, msg).await?;
@@ -306,7 +306,7 @@ where
             .await?;
 
         let msg = EncryptRecord {
-            msg,
+            info: EncryptInfo::Message(msg),
             visibility: Visibility::Private,
         };
         let msg = self.encrypter.encrypt(vm, ctx, msg).await?;

@@ -55,8 +55,14 @@ pub(crate) enum Direction {
 
 /// Wrapper for TLS records that need to be encrypted.
 struct EncryptRecord {
-    msg: PlainMessage,
+    info: EncryptInfo,
     visibility: Visibility,
+}
+
+/// Either contains the message or the length of the message.
+enum EncryptInfo {
+    Message(PlainMessage),
+    Length(usize),
 }
 
 /// Wrapper for TLS records that need to be decrypted.

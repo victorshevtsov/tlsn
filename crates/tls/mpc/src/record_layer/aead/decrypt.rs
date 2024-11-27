@@ -9,7 +9,7 @@ use crate::{
     },
     MpcTlsError, TlsRole, Visibility,
 };
-use cipher::{aes::Aes128, Keystream};
+use cipher::{aes::Aes128, Input::Message, Keystream};
 use futures::{stream::FuturesOrdered, StreamExt};
 use mpz_common::Context;
 use mpz_core::bitvec::BitVec;
@@ -91,7 +91,12 @@ impl AesGcmDecrypt {
 
             let cipher_out = keystream.apply(vm, cipher_ref).map_err(MpcTlsError::vm)?;
             let plaintext_ref = cipher_out
-                .assign(vm, explicit_nonce, START_COUNTER, ciphertext.clone())
+                .assign(
+                    vm,
+                    explicit_nonce,
+                    START_COUNTER,
+                    Message(ciphertext.clone()),
+                )
                 .map_err(MpcTlsError::vm)?;
 
             let decode = match visibility {
@@ -138,7 +143,67 @@ impl AesGcmDecrypt {
         V: Vm<Binary> + View<Binary>,
         Ctx: Context,
     {
+        let len = requests.len();
+        let mut decrypt = Decrypt::new(self.role, self.ghash.clone(), len);
+        let mut plaintext_refs = Vec::with_capacity(len);
+
+        for DecryptRequest {
+            ciphertext,
+            typ,
+            visibility,
+            version,
+            explicit_nonce,
+            aad,
+            purported_tag,
+        } in requests
+        {
+            let j0 = Self::aes_ctr_local(&key, &iv, 1, &explicit_nonce, &[0; 16])?;
+            let plaintext = Self::aes_ctr_local(
+                &key,
+                &iv,
+                START_COUNTER as usize,
+                &explicit_nonce,
+                &ciphertext,
+            )?;
+        }
         todo!()
+    }
+
+    fn aes_ctr_local(
+        key: &[u8],
+        iv: &[u8],
+        start_ctr: usize,
+        explicit_nonce: &[u8],
+        msg: &[u8],
+    ) -> Result<Vec<u8>, MpcTlsError> {
+        use aes::Aes128;
+        use cipher_crate::{KeyIvInit, StreamCipher, StreamCipherSeek};
+        use ctr::Ctr32BE;
+
+        const BLOCK_LEN: usize = 16;
+
+        let key: &[u8; 16] = key
+            .try_into()
+            .map_err(|_| MpcTlsError::decrypt("key has wrong length for local decrypt"))?;
+        let iv: &[u8; 4] = iv
+            .try_into()
+            .map_err(|_| MpcTlsError::decrypt("iv has wrong length for local decrypt"))?;
+        let explicit_nonce: &[u8; 8] = explicit_nonce
+            .try_into()
+            .map_err(|_| MpcTlsError::decrypt("nonce has wrong length for local decrypt"))?;
+
+        let mut full_iv = [0u8; 16];
+        full_iv[0..4].copy_from_slice(iv);
+        full_iv[4..12].copy_from_slice(explicit_nonce);
+        let mut cipher = Ctr32BE::<Aes128>::new(key.into(), &full_iv.into());
+        let mut buf = msg.to_vec();
+
+        cipher
+            .try_seek(start_ctr * BLOCK_LEN)
+            .expect("start counter is less than keystream length");
+        cipher.apply_keystream(&mut buf);
+
+        Ok(buf)
     }
 }
 

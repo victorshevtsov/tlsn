@@ -49,6 +49,9 @@ tracing = { workspace = true }
 rand = { workspace = true }
 ghash_rc = { package = "ghash", version = "0.5", optional = true }
 opaque-debug = { workspace = true }
+aes = { workspace = true }
+ctr = { workspace = true }
+cipher-crate = { package = "cipher", version = "0.4" }
 
 
 [dev-dependencies]

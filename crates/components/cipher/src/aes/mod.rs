@@ -142,7 +142,7 @@ where
 mod tests {
     use crate::{
         aes::{Aes128, MpcAes},
-        Cipher,
+        Cipher, Input,
     };
     use mpz_common::{
         executor::{test_st_executor, TestSTExecutor},
@@ -187,10 +187,10 @@ mod tests {
         let cipher_out_ev = keystream_ev.apply(&mut ev, msg_ref_ev).unwrap();
 
         let out_gen = cipher_out_gen
-            .assign(&mut gen, nonce, start_counter, msg.clone())
+            .assign(&mut gen, nonce, start_counter, Input::Message(msg.clone()))
             .unwrap();
         let out_ev = cipher_out_ev
-            .assign(&mut ev, nonce, start_counter, msg.clone())
+            .assign(&mut ev, nonce, start_counter, Input::Message(msg.clone()))
             .unwrap();
 
         let (ciphertext_gen, ciphetext_ev) = tokio::try_join!(

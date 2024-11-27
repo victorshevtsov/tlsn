@@ -9,7 +9,7 @@ use crate::{
     },
     MpcTlsError, TlsRole,
 };
-use cipher::{aes::Aes128, Keystream};
+use cipher::{aes::Aes128, Input, Keystream};
 use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
 use mpz_common::Context;
 use mpz_core::bitvec::BitVec;
@@ -81,7 +81,13 @@ impl AesGcmEncrypt {
             let j0 = Decode::new(vm, self.role, transmute(j0))?;
             let j0 = j0.shared(vm)?;
 
-            let keystream = self.keystream.chunk_sufficient(plaintext.len())?;
+            let len = plaintext_ref.len();
+            let keystream = self.keystream.chunk_sufficient(len)?;
+
+            let plaintext = match plaintext {
+                Some(plaintext) => Input::Message(plaintext),
+                None => Input::Length(len),
+            };
 
             let cipher_out = keystream
                 .apply(vm, plaintext_ref)

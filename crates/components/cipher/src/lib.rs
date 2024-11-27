@@ -228,22 +228,27 @@ impl<C: CipherCircuit> CipherOutput<C> {
         vm: &mut V,
         explicit_nonce: <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear,
         start_ctr: u32,
-        message: Vec<u8>,
+        message: Input,
     ) -> Result<Vector<U8>, CipherError>
     where
         V: Vm<Binary>,
         <<C as CipherCircuit>::Counter as Repr<Binary>>::Clear: From<[u8; 4]>,
         <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear: Copy,
     {
-        if self.len() != message.len() {
+        let (len, message) = match message {
+            Input::Message(msg) => (msg.len(), Some(msg)),
+            Input::Length(len) => (len, None),
+        };
+
+        if self.len() != len {
             return Err(CipherError::new(format!(
                 "message has wrong length, got {}, but expected {}",
-                message.len(),
+                len,
                 self.len()
             )));
         }
 
-        let message_len = message.len() as u32;
+        let message_len = len as u32;
         let block_count = (message_len / 16) + (message_len % 16 != 0) as u32;
         let counters = (start_ctr..start_ctr + block_count).map(|counter| counter.to_be_bytes());
 
@@ -260,7 +265,9 @@ impl<C: CipherCircuit> CipherOutput<C> {
             vm.commit(nonce).map_err(CipherError::new)?;
         }
 
-        vm.assign(self.input, message).map_err(CipherError::new)?;
+        if let Some(msg) = message {
+            vm.assign(self.input, msg).map_err(CipherError::new)?;
+        }
         vm.commit(self.input).map_err(CipherError::new)?;
 
         Ok(self.output)
@@ -271,6 +278,14 @@ impl<C: CipherCircuit> CipherOutput<C> {
     pub fn len(&self) -> usize {
         self.input.len()
     }
+}
+
+/// The input for the cipher.
+pub enum Input {
+    /// The actual message if available.
+    Message(Vec<u8>),
+    /// The length of the message.
+    Length(usize),
 }
 
 /// A cipher error.
