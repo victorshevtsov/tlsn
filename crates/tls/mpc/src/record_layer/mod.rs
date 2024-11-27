@@ -22,9 +22,10 @@ use tls_core::{
 };
 
 pub(crate) mod aead;
-use aead::{ghash::Tag, AesGcmDecrypt, AesGcmEncrypt, Decrypt, Encrypt};
-
-use self::aead::ghash::Ghash;
+use aead::{
+    ghash::{Ghash, Tag},
+    AesGcmDecrypt, AesGcmEncrypt, Decrypt, Encrypt,
+};
 
 pub struct Encrypter<Sc> {
     role: TlsRole,
@@ -216,6 +217,8 @@ struct EncryptRequest {
 
 pub struct Decrypter<Sc> {
     role: TlsRole,
+    key: Option<Vec<u8>>,
+    iv: Option<Vec<u8>>,
     transcript: Transcript,
     queue: Vec<DecryptRecord>,
     state: DecryptState<Sc>,
@@ -225,6 +228,8 @@ impl<Sc> Decrypter<Sc> {
     pub fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
         Self {
             role,
+            key: None,
+            iv: None,
             transcript: Transcript::default(),
             queue: Vec::default(),
             state: DecryptState::Init { ghash },
@@ -267,6 +272,11 @@ impl<Sc> Decrypter<Sc> {
             ghash_key,
         };
         Ok(())
+    }
+
+    pub fn set_key_and_iv(&mut self, key: Option<Vec<u8>>, iv: Option<Vec<u8>>) {
+        self.key = key;
+        self.iv = iv;
     }
 
     pub async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
@@ -392,6 +402,9 @@ impl<Sc> Decrypter<Sc> {
         &mut self,
         _msg: OpaqueMessage,
     ) -> Result<PlainMessage, MpcTlsError> {
+        // TODO
+        // 1: Locally decrypt
+        // 2: Prove plaintext re-encrypts back to ciphertext
         todo!()
     }
 
@@ -404,6 +417,8 @@ impl<Sc> Decrypter<Sc> {
         &mut self,
         _msg: OpaqueMessage,
     ) -> Result<(), MpcTlsError> {
+        // TODO
+        // 1: Verify plaintext re-encrypts back to ciphertext
         todo!()
     }
 }

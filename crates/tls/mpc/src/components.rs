@@ -44,15 +44,7 @@ where
         ShareConversionReceiver::new(rr_p),
     );
 
-    let prf = MpcPrf::new(
-        PrfConfig::builder()
-            .role(match role {
-                TlsRole::Leader => PrfRole::Leader,
-                TlsRole::Follower => PrfRole::Follower,
-            })
-            .build()
-            .unwrap(),
-    );
+    let prf = MpcPrf::new(PrfConfig::builder().role(PrfRole::Leader).build().unwrap());
 
     let cipher = MpcAes::default();
 
@@ -81,8 +73,8 @@ pub fn build_follower<V, RSP, RRP, RRGF>(
     impl KeyExchange<V>,
     impl Prf<V>,
     MpcAes,
-    Ghash<impl ShareConvert<Gf2_128>>,
-    Ghash<impl ShareConvert<Gf2_128>>,
+    Encrypter<impl ShareConvert<Gf2_128>>,
+    Decrypter<impl ShareConvert<Gf2_128>>,
 )
 where
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
@@ -103,10 +95,7 @@ where
 
     let prf = MpcPrf::new(
         PrfConfig::builder()
-            .role(match role {
-                TlsRole::Leader => PrfRole::Leader,
-                TlsRole::Follower => PrfRole::Follower,
-            })
+            .role(PrfRole::Follower)
             .build()
             .unwrap(),
     );
@@ -117,10 +106,13 @@ where
         GhashConfig::builder().build().unwrap(),
         ShareConversionReceiver::new(rr_gf0),
     );
+    let encrypter = Encrypter::new(role, ghash_encrypt);
+
     let ghash_decrypt = Ghash::new(
         GhashConfig::builder().build().unwrap(),
         ShareConversionReceiver::new(rr_gf1),
     );
+    let decrypter = Decrypter::new(role, ghash_decrypt);
 
-    (ke, prf, cipher, ghash_encrypt, ghash_decrypt)
+    (ke, prf, cipher, encrypter, decrypter)
 }

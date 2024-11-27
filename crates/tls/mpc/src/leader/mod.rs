@@ -54,6 +54,7 @@ use tracing::{debug, instrument, trace};
 /// MPC-TLS leader.
 pub struct MpcTlsLeader<K, P, C, Sc, Ctx, V> {
     config: MpcTlsLeaderConfig,
+    role: TlsRole,
     channel: MpcTlsChannel,
 
     state: State,
@@ -105,6 +106,7 @@ where
 
         Self {
             config,
+            role: TlsRole::Leader,
             channel,
             state: State::default(),
             ke,
@@ -127,7 +129,6 @@ where
     pub async fn setup(&mut self) -> Result<(), MpcTlsError> {
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
-        let role = TlsRole::Leader;
 
         // Allocate
         self.ke.alloc()?;
@@ -156,7 +157,7 @@ where
             .assign_block(vm, zero_ref, [0_u8; 16])
             .map_err(MpcTlsError::cipher)?;
         let ghash_key = transmute(ghash_key);
-        let ghash_key = Decode::new(vm, role, ghash_key)?.shared(vm)?;
+        let ghash_key = Decode::new(vm, self.role, ghash_key)?.shared(vm)?;
 
         self.encrypter.prepare(keystream_encrypt, ghash_key)?;
 
@@ -180,7 +181,7 @@ where
             .assign_block(vm, zero_ref, [0_u8; 16])
             .map_err(MpcTlsError::cipher)?;
         let ghash_key = transmute(ghash_key);
-        let ghash_key = Decode::new(vm, role, ghash_key)?.shared(vm)?;
+        let ghash_key = Decode::new(vm, self.role, ghash_key)?.shared(vm)?;
 
         self.decrypter.prepare(keystream_decrypt, ghash_key)?;
 
@@ -474,17 +475,20 @@ where
     }
 
     pub async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
-        let role = TlsRole::Leader;
         let vm = &mut self.vm;
 
         let key = self.cipher.key().map_err(MpcTlsError::cipher)?;
         let key = transmute(key);
-        let key = Decode::new(vm, role, key)?.private(vm)?;
-        let key = key.decode().await?.expect("Leader shoule get some key");
+        let key = Decode::new(vm, self.role, key)?.private(vm)?;
 
-        // TODO: Decide where to put the key now.
+        let iv = self.cipher.iv().map_err(MpcTlsError::cipher)?;
+        let iv = transmute(iv);
+        let iv = Decode::new(vm, self.role, iv)?.private(vm)?;
 
-        todo!()
+        let (key, iv) = futures::try_join!(key.decode(), iv.decode())?;
+        self.decrypter.set_key_and_iv(key, iv);
+
+        Ok(())
     }
 }
 

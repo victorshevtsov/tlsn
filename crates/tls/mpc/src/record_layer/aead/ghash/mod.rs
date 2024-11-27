@@ -15,9 +15,7 @@ mod error;
 mod ghash_core;
 mod ghash_inner;
 pub(crate) use error::UniversalHashError;
-pub(crate) use ghash_inner::{
-    Ghash, GhashCompute, GhashConfig, GhashConfigBuilder, GhashConfigBuilderError,
-};
+pub(crate) use ghash_inner::{Ghash, GhashCompute, GhashConfig};
 
 /// Contains data needed to compute tags.
 pub(crate) struct TagComputer {
