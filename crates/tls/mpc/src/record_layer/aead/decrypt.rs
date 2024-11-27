@@ -9,7 +9,7 @@ use crate::{
     },
     MpcTlsError, TlsRole, Visibility,
 };
-use cipher::{aes::Aes128, Input::Message, Keystream};
+use cipher::{aes::Aes128, Input, Keystream};
 use futures::{stream::FuturesOrdered, StreamExt};
 use mpz_common::Context;
 use mpz_core::bitvec::BitVec;
@@ -95,7 +95,7 @@ impl AesGcmDecrypt {
                     vm,
                     explicit_nonce,
                     START_COUNTER,
-                    Message(ciphertext.clone()),
+                    Input::Message(ciphertext.clone()),
                 )
                 .map_err(MpcTlsError::vm)?;
 
@@ -129,6 +129,8 @@ impl AesGcmDecrypt {
     ///
     /// * `vm` - A virtual machine for 2PC.
     /// * `ctx` - The context for IO.
+    /// * `key` - The key for the decryption operation.
+    /// * `iv` - The iv for the decryption operation.
     /// * `requests` - Decryption requests.
     #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn decrypt_local<V, Ctx>(
@@ -316,10 +318,8 @@ impl Decrypt {
 pub(crate) struct DecryptLocal {
     role: TlsRole,
     ghash: GhashCompute,
+    j0s: Vec<Vec<u8>>,
     ciphertexts: Vec<Vec<u8>>,
-    decodes: Vec<DecryptDecode>,
-    typs: Vec<ContentType>,
-    versions: Vec<ProtocolVersion>,
     aads: Vec<[u8; 13]>,
     purported_tags: Vec<Tag>,
 }
@@ -332,9 +332,6 @@ impl DecryptLocal {
             ghash,
             j0s: Vec::with_capacity(cap),
             ciphertexts: Vec::with_capacity(cap),
-            decodes: Vec::with_capacity(cap),
-            typs: Vec::with_capacity(cap),
-            versions: Vec::with_capacity(cap),
             aads: Vec::with_capacity(cap),
             purported_tags: Vec::with_capacity(cap),
         }
@@ -343,7 +340,7 @@ impl DecryptLocal {
     /// Adds a decrypt operation.
     pub(crate) fn push(
         &mut self,
-        j0: OneTimePadShared,
+        j0: Vec<u8>,
         ciphertext: Vec<u8>,
         decode: DecryptDecode,
         typ: ContentType,
@@ -353,9 +350,6 @@ impl DecryptLocal {
     ) {
         self.j0s.push(j0);
         self.ciphertexts.push(ciphertext);
-        self.decodes.push(decode);
-        self.typs.push(typ);
-        self.versions.push(version);
         self.aads.push(aad);
         self.purported_tags.push(purported_tag);
     }

@@ -631,6 +631,20 @@ where
 
         let sf_vd = self.prf_out.expect("Prf output should be set").sf_vd;
 
+        let ctx = &mut self.ctx;
+        self.vm
+            .flush(ctx)
+            .await
+            .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        self.vm
+            .execute(ctx)
+            .await
+            .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        self.vm
+            .flush(ctx)
+            .await
+            .map_err(|e| BackendError::InternalError(e.to_string()))?;
+
         let sf_vd = self
             .vm
             .decode(sf_vd)
@@ -661,6 +675,20 @@ where
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let cf_vd = self.prf_out.expect("Prf output should be set").cf_vd;
+
+        let ctx = &mut self.ctx;
+        self.vm
+            .flush(ctx)
+            .await
+            .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        self.vm
+            .execute(ctx)
+            .await
+            .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        self.vm
+            .flush(ctx)
+            .await
+            .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
         let cf_vd = self
             .vm
@@ -716,17 +744,30 @@ where
             .compute_pms(&mut self.vm)
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
-        eq.check()
-            .await
-            .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
-
         self.prf
             .set_server_random(&mut self.vm, server_random.0)
             .map_err(|err| BackendError::Prf(err.to_string()))?;
 
+        let ctx = &mut self.ctx;
+        self.vm
+            .flush(ctx)
+            .await
+            .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        self.vm
+            .execute(ctx)
+            .await
+            .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        self.vm
+            .flush(ctx)
+            .await
+            .map_err(|e| BackendError::InternalError(e.to_string()))?;
+
+        eq.check()
+            .await
+            .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
+
         // Set ghash keys
         // TODO: Optimize this with ctx try join
-        let ctx = &mut self.ctx;
         self.encrypter
             .start(ctx)
             .await
