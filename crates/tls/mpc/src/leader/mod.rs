@@ -248,9 +248,7 @@ where
             visibility: Visibility::Public,
         };
 
-        let msg = self.encrypter.encrypt(vm, msg)?;
-        let mut msg = msg.compute(ctx).await?;
-        let msg = msg.pop().expect("Encrypted messages should not be empty");
+        let msg = self.encrypter.encrypt(vm, ctx, msg).await?;
 
         self.state = State::Sf(Sf { data });
 
@@ -285,9 +283,7 @@ where
             msg,
             visibility: Visibility::Public,
         };
-        let msg = self.encrypter.encrypt(vm, msg)?;
-        let mut msg = msg.compute(ctx).await?;
-        let msg = msg.pop().expect("Encrypted messages should not be empty");
+        let msg = self.encrypter.encrypt(vm, ctx, msg).await?;
 
         Ok(msg)
     }
@@ -313,9 +309,7 @@ where
             msg,
             visibility: Visibility::Private,
         };
-        let msg = self.encrypter.encrypt(vm, msg)?;
-        let mut msg = msg.compute(ctx).await?;
-        let msg = msg.pop().expect("Encrypted messages should not be empty");
+        let msg = self.encrypter.encrypt(vm, ctx, msg).await?;
 
         Ok(msg)
     }
@@ -342,12 +336,8 @@ where
             visibility: Visibility::Public,
         };
 
-        let msg = self.decrypter.decrypt(vm, msg)?;
-        let mut msg = msg.compute(ctx).await?;
-        let msg = msg
-            .pop()
-            .expect("Decrypted messages should not be empty")
-            .expect("Leader should recieve some message");
+        let msg = self.decrypter.decrypt(vm, ctx, msg).await?;
+        let msg = msg.expect("Leader should recieve some message");
 
         self.state = State::Active(Active { data });
 
@@ -371,12 +361,8 @@ where
             visibility: Visibility::Public,
         };
 
-        let msg = self.decrypter.decrypt(vm, msg)?;
-        let mut msg = msg.compute(ctx).await?;
-        let msg = msg
-            .pop()
-            .expect("Decrypted messages should not be empty")
-            .expect("Leader should recieve some message");
+        let msg = self.decrypter.decrypt(vm, ctx, msg).await?;
+        let msg = msg.expect("Leader should recieve some message");
 
         Ok(msg)
     }
@@ -396,25 +382,13 @@ where
             .send(MpcTlsMessage::DecryptMessage(DecryptMessage))
             .await?;
 
-        let msg = if self.committed {
-            // At this point the AEAD key was revealed to us. We will locally decrypt the
-            // TLS message and will prove the knowledge of the plaintext to the
-            // follower.
-            self.decrypter.prove_plaintext(msg).await?
-        } else {
-            let msg = DecryptRecord {
-                msg,
-                visibility: Visibility::Private,
-            };
-
-            let msg = self.decrypter.decrypt(vm, msg)?;
-            let mut msg = msg.compute(ctx).await?;
-            let msg = msg
-                .pop()
-                .expect("Decrypted messages should not be empty")
-                .expect("Leader should recieve some message");
-            msg
+        let msg = DecryptRecord {
+            msg,
+            visibility: Visibility::Private,
         };
+
+        let msg = self.decrypter.decrypt(vm, ctx, msg).await?;
+        let msg = msg.expect("Leader should recieve some message");
 
         Ok(msg)
     }
@@ -476,6 +450,7 @@ where
 
     pub async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
         let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
 
         let key = self.cipher.key().map_err(MpcTlsError::cipher)?;
         let key = transmute(key);
@@ -484,6 +459,10 @@ where
         let iv = self.cipher.iv().map_err(MpcTlsError::cipher)?;
         let iv = transmute(iv);
         let iv = Decode::new(vm, self.role, iv)?.private(vm)?;
+
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
         let (key, iv) = futures::try_join!(key.decode(), iv.decode())?;
         self.decrypter.set_key_and_iv(key, iv);

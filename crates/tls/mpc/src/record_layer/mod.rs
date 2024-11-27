@@ -5,6 +5,7 @@ use crate::{
     TlsRole, Visibility,
 };
 use cipher::{aes::Aes128, Keystream};
+use mpz_circuits::types::ToBinaryRepr;
 use mpz_common::{Context, Flush};
 use mpz_fields::gf2_128::Gf2_128;
 use mpz_memory_core::{
@@ -12,7 +13,7 @@ use mpz_memory_core::{
     MemoryExt, Vector, View, ViewExt,
 };
 use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
-use mpz_vm_core::Vm;
+use mpz_vm_core::{Execute, Vm};
 use tls_core::{
     cipher::make_tls12_aad,
     msgs::{
@@ -113,9 +114,14 @@ impl<Sc> Encrypter<Sc> {
         self.queue.push(encrypt);
     }
 
-    pub fn encrypt_all<V>(&mut self, vm: &mut V) -> Result<Encrypt, MpcTlsError>
+    pub async fn encrypt_all<V, Ctx>(
+        &mut self,
+        vm: &mut V,
+        ctx: &mut Ctx,
+    ) -> Result<Vec<OpaqueMessage>, MpcTlsError>
     where
-        V: Vm<Binary> + View<Binary>,
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
     {
         let EncryptState::Ready(ref mut aes) = self.state else {
             return Err(MpcTlsError::encrypt("Encrypter is not in Ready state"));
@@ -125,29 +131,51 @@ impl<Sc> Encrypter<Sc> {
         let mut encrypts = Vec::with_capacity(encrypt_records.len());
 
         for message in encrypt_records {
-            let encrypt = Self::encrypt_inner(self.role, vm, &mut self.transcript, message)?;
+            let encrypt = Self::prepare_encrypt(self.role, vm, &mut self.transcript, message)?;
             encrypts.push(encrypt);
         }
 
         let encrypt = aes.encrypt(vm, encrypts)?;
-        Ok(encrypt)
+
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        let messages = encrypt.compute(ctx).await?;
+        Ok(messages)
     }
 
-    pub fn encrypt<V>(&mut self, vm: &mut V, message: EncryptRecord) -> Result<Encrypt, MpcTlsError>
+    pub async fn encrypt<V, Ctx>(
+        &mut self,
+        vm: &mut V,
+        ctx: &mut Ctx,
+        message: EncryptRecord,
+    ) -> Result<OpaqueMessage, MpcTlsError>
     where
-        V: Vm<Binary> + View<Binary>,
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
     {
         let EncryptState::Ready(ref mut aes) = self.state else {
             return Err(MpcTlsError::encrypt("Encrypter is not in Ready state"));
         };
 
-        let encrypt = Self::encrypt_inner(self.role, vm, &mut self.transcript, message)?;
+        let encrypt = Self::prepare_encrypt(self.role, vm, &mut self.transcript, message)?;
+
         let encrypt = aes.encrypt(vm, vec![encrypt])?;
 
-        Ok(encrypt)
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        let mut message = encrypt.compute(ctx).await?;
+        let message = message
+            .pop()
+            .expect("Should contain at least one opaque message");
+
+        Ok(message)
     }
 
-    fn encrypt_inner<V>(
+    fn prepare_encrypt<V>(
         role: TlsRole,
         vm: &mut V,
         transcript: &mut Transcript,
@@ -164,7 +192,7 @@ impl<Sc> Encrypter<Sc> {
             payload,
         } = msg;
 
-        let seq = transcript.seq();
+        let seq = transcript.inc_seq();
         let len = payload.0.len();
         let explicit_nonce = seq.to_be_bytes();
         let aad = make_tls12_aad(seq, typ, version, len);
@@ -311,9 +339,14 @@ impl<Sc> Decrypter<Sc> {
         self.queue.push(decrypt);
     }
 
-    pub fn decrypt_all<V>(&mut self, vm: &mut V) -> Result<Decrypt, MpcTlsError>
+    pub async fn decrypt_all<V, Ctx>(
+        &mut self,
+        vm: &mut V,
+        ctx: &mut Ctx,
+    ) -> Result<Option<Vec<PlainMessage>>, MpcTlsError>
     where
-        V: Vm<Binary> + View<Binary>,
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
     {
         let DecryptState::Ready(ref mut aes) = self.state else {
             return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
@@ -325,39 +358,70 @@ impl<Sc> Decrypter<Sc> {
         let mut typs = Vec::with_capacity(decrypt_records.len());
 
         for message in decrypt_records {
-            let (decrypt, typ) = Self::decrypt_inner(&mut self.transcript, message)?;
+            let (decrypt, typ) = Self::prepare_decrypt(&mut self.transcript, message)?;
 
             decrypts.push(decrypt);
             typs.push(typ);
         }
-        let (decrypt, plaintext_refs) = aes.decrypt(vm, decrypts)?;
+        let key_and_iv = match (self.key.clone(), self.iv.clone()) {
+            (Some(key), Some(iv)) => Some((key, iv)),
+            _ => None,
+        };
+        let (decrypt, plaintext_refs) = aes.decrypt(vm, key_and_iv, decrypts)?;
+
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        let messages = decrypt.compute(ctx).await?;
+        //TODO: Prove that plaintext encrypts to ciphertext
 
         for (&typ, plaintext_ref) in typs.iter().zip(plaintext_refs) {
             self.transcript.record(typ, plaintext_ref);
         }
 
-        Ok(decrypt)
+        Ok(messages)
     }
 
-    pub fn decrypt<V>(&mut self, vm: &mut V, message: DecryptRecord) -> Result<Decrypt, MpcTlsError>
+    pub async fn decrypt<V, Ctx>(
+        &mut self,
+        vm: &mut V,
+        ctx: &mut Ctx,
+        message: DecryptRecord,
+    ) -> Result<Option<PlainMessage>, MpcTlsError>
     where
-        V: Vm<Binary> + View<Binary>,
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
     {
         let DecryptState::Ready(ref mut aes) = self.state else {
             return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
         };
-        let (decrypt, typ) = Self::decrypt_inner(&mut self.transcript, message)?;
-        let (decrypt, mut plaintext_refs) = aes.decrypt(vm, vec![decrypt])?;
+        let (decrypt, typ) = Self::prepare_decrypt(&mut self.transcript, message)?;
 
+        let key_and_iv = match (self.key.clone(), self.iv.clone()) {
+            (Some(key), Some(iv)) => Some((key, iv)),
+            _ => None,
+        };
+        let (decrypt, mut plaintext_refs) = aes.decrypt(vm, key_and_iv, vec![decrypt])?;
         let plaintext_ref = plaintext_refs
             .pop()
             .expect("Plaintext references should not be empty");
 
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        let message = decrypt.compute(ctx).await?;
+        let message =
+            message.map(|mut m| m.pop().expect("Should contain at least one opaque message"));
+
+        //TODO: Prove that plaintext encrypts to ciphertext
+
         self.transcript.record(typ, plaintext_ref);
-        Ok(decrypt)
+        Ok(message)
     }
 
-    fn decrypt_inner(
+    fn prepare_decrypt(
         transcript: &mut Transcript,
         message: DecryptRecord,
     ) -> Result<(DecryptRequest, ContentType), MpcTlsError> {
@@ -371,7 +435,7 @@ impl<Sc> Decrypter<Sc> {
 
         let mut ciphertext = payload.0;
 
-        let seq = transcript.seq();
+        let seq = transcript.inc_seq();
         let explicit_nonce: [u8; 8] = ciphertext
             .drain(..8)
             .collect::<Vec<u8>>()

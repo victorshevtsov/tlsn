@@ -19,16 +19,18 @@ impl Transcript {
     /// * `typ` - Content type of the TLS message.
     /// * `traffic` - The byte references to the TLS traffic.
     pub(crate) fn record(&mut self, typ: ContentType, traffic: Vector<U8>) {
-        self.seq += 1;
         if let ContentType::ApplicationData = typ {
             self.size += traffic.len();
             self.bytes.push(traffic);
         }
     }
 
-    /// Returns the current TLS sequence number.
-    pub(crate) fn seq(&self) -> u64 {
-        self.seq
+    /// Returns the current TLS sequence number and increments it.
+    pub(crate) fn inc_seq(&mut self) -> u64 {
+        let seq = self.seq;
+        self.seq += 1;
+
+        seq
     }
 
     /// Returns the transcript size in bytes.

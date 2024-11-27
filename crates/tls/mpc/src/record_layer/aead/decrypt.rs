@@ -59,6 +59,7 @@ impl AesGcmDecrypt {
     pub(crate) fn decrypt<V>(
         &mut self,
         vm: &mut V,
+        key_and_iv: Option<(Vec<u8>, Vec<u8>)>,
         requests: Vec<DecryptRequest>,
     ) -> Result<(Decrypt, Vec<Vector<U8>>), MpcTlsError>
     where
@@ -105,6 +106,26 @@ impl AesGcmDecrypt {
         }
 
         Ok((decrypt, plaintext_refs))
+    }
+
+    /// Preparation for locally decrypting a ciphertext.
+    ///
+    /// Returns [`DecryptLocal`].
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - A virtual machine for 2PC.
+    /// * `requests` - Decryption requests.
+    #[instrument(level = "trace", skip_all, err)]
+    pub(crate) fn decrypt_local<V>(
+        &mut self,
+        vm: &mut V,
+        requests: Vec<DecryptRequest>,
+    ) -> Result<DecryptLocal, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary>,
+    {
+        todo!()
     }
 }
 
@@ -170,7 +191,7 @@ impl Decrypt {
     pub(crate) async fn compute<Ctx>(
         self,
         ctx: &mut Ctx,
-    ) -> Result<Vec<Option<PlainMessage>>, MpcTlsError>
+    ) -> Result<Option<Vec<PlainMessage>>, MpcTlsError>
     where
         Ctx: Context,
     {
@@ -198,7 +219,7 @@ impl Decrypt {
         tags.verify(ctx, self.role, TagBatch::new(self.purported_tags))
             .await?;
 
-        let output = self
+        let output: Option<Vec<PlainMessage>> = self
             .typs
             .into_iter()
             .zip(self.versions)
@@ -213,6 +234,70 @@ impl Decrypt {
             .collect();
 
         Ok(output)
+    }
+}
+
+/// A struct for local decryption operations.
+pub(crate) struct DecryptLocal {
+    role: TlsRole,
+    ghash: GhashCompute,
+    ciphertexts: Vec<Vec<u8>>,
+    decodes: Vec<DecryptDecode>,
+    typs: Vec<ContentType>,
+    versions: Vec<ProtocolVersion>,
+    aads: Vec<[u8; 13]>,
+    purported_tags: Vec<Tag>,
+}
+
+impl DecryptLocal {
+    /// Creates a new instance.
+    pub(crate) fn new(role: TlsRole, ghash: GhashCompute, cap: usize) -> Self {
+        Self {
+            role,
+            ghash,
+            j0s: Vec::with_capacity(cap),
+            ciphertexts: Vec::with_capacity(cap),
+            decodes: Vec::with_capacity(cap),
+            typs: Vec::with_capacity(cap),
+            versions: Vec::with_capacity(cap),
+            aads: Vec::with_capacity(cap),
+            purported_tags: Vec::with_capacity(cap),
+        }
+    }
+
+    /// Adds a decrypt operation.
+    pub(crate) fn push(
+        &mut self,
+        j0: OneTimePadShared,
+        ciphertext: Vec<u8>,
+        decode: DecryptDecode,
+        typ: ContentType,
+        version: ProtocolVersion,
+        aad: [u8; 13],
+        purported_tag: Tag,
+    ) {
+        self.j0s.push(j0);
+        self.ciphertexts.push(ciphertext);
+        self.decodes.push(decode);
+        self.typs.push(typ);
+        self.versions.push(version);
+        self.aads.push(aad);
+        self.purported_tags.push(purported_tag);
+    }
+
+    /// Computes the plaintext.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The context for IO.
+    pub(crate) async fn compute<Ctx>(
+        self,
+        ctx: &mut Ctx,
+    ) -> Result<Option<Vec<PlainMessage>>, MpcTlsError>
+    where
+        Ctx: Context,
+    {
+        todo!()
     }
 }
 
