@@ -321,14 +321,16 @@ impl<Sc> Decrypter<Sc> {
         };
         let mut decrypts = Vec::with_capacity(messages.len());
 
+        let mut seq = self.transcript.seq();
         for msg in messages.iter().cloned() {
             let visibility = match msg.typ {
                 ContentType::ApplicationData => Visibility::Private,
                 _ => Visibility::Public,
             };
             let message = DecryptRecord { msg, visibility };
-            let (decrypt, _) = Self::prepare_decrypt(&mut self.transcript, message)?;
+            let decrypt = Self::prepare_tag_verify(seq, message)?;
 
+            seq += 1;
             decrypts.push(decrypt);
         }
 
@@ -373,6 +375,40 @@ impl<Sc> Decrypter<Sc> {
         }
 
         Ok(messages)
+    }
+
+    fn prepare_tag_verify(seq: u64, message: DecryptRecord) -> Result<DecryptRequest, MpcTlsError> {
+        let DecryptRecord { msg, visibility } = message;
+
+        let OpaqueMessage {
+            typ,
+            version,
+            payload,
+        } = msg;
+
+        let mut ciphertext = payload.0;
+
+        let explicit_nonce: [u8; 8] = ciphertext
+            .drain(..8)
+            .collect::<Vec<u8>>()
+            .try_into()
+            .expect("Should be able to drain explicit nonce");
+
+        let purported_tag = Tag::new(ciphertext.split_off(ciphertext.len() - 16));
+        let len = ciphertext.len();
+        let aad = make_tls12_aad(seq, typ, version, len);
+
+        let decrypt = DecryptRequest {
+            ciphertext,
+            typ,
+            visibility,
+            version,
+            explicit_nonce,
+            aad,
+            purported_tag,
+        };
+
+        Ok(decrypt)
     }
 
     fn prepare_decrypt(

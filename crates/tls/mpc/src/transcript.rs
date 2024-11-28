@@ -33,6 +33,11 @@ impl Transcript {
         seq
     }
 
+    /// Returns the current TLS sequence number.
+    pub(crate) fn seq(&mut self) -> u64 {
+        self.seq
+    }
+
     /// Returns the transcript size in bytes.
     pub(crate) fn size(&self) -> usize {
         self.size
