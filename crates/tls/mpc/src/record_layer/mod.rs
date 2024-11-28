@@ -211,8 +211,6 @@ struct EncryptRequest {
 
 pub struct Decrypter<Sc> {
     role: TlsRole,
-    key: Option<Vec<u8>>,
-    iv: Option<Vec<u8>>,
     decrypt_local: bool,
     transcript: Transcript,
     queue: Vec<DecryptRecord>,
@@ -223,8 +221,6 @@ impl<Sc> Decrypter<Sc> {
     pub fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
         Self {
             role,
-            key: None,
-            iv: None,
             decrypt_local: false,
             transcript: Transcript::default(),
             queue: Vec::default(),

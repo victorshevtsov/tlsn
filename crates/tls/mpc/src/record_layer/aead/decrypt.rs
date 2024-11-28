@@ -345,8 +345,8 @@ impl Decrypt {
             .into_iter()
             .zip(self.versions)
             .zip(plaintexts)
-            .map(|((typ, version), ciphertext)| {
-                ciphertext.map(|c| PlainMessage {
+            .map(|((typ, version), plaintext)| {
+                plaintext.map(|c| PlainMessage {
                     typ,
                     version,
                     payload: Payload(c),

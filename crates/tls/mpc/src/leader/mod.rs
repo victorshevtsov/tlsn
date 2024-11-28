@@ -452,6 +452,8 @@ where
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
 
+        //TODO: Do Tag verification here
+
         let key = self.cipher.key().map_err(MpcTlsError::cipher)?;
         let key = transmute(key);
         let key = Decode::new(vm, self.role, key)?.private(vm)?;
