@@ -5,7 +5,6 @@ use crate::{
     MpcTlsError, TlsRole, Visibility,
 };
 use cipher::{aes::Aes128, Keystream};
-use mpz_circuits::types::ToBinaryRepr;
 use mpz_common::{Context, Flush};
 use mpz_fields::gf2_128::Gf2_128;
 use mpz_memory_core::{
@@ -214,6 +213,7 @@ pub struct Decrypter<Sc> {
     role: TlsRole,
     key: Option<Vec<u8>>,
     iv: Option<Vec<u8>>,
+    decrypt_local: bool,
     transcript: Transcript,
     queue: Vec<DecryptRecord>,
     state: DecryptState<Sc>,
@@ -225,6 +225,7 @@ impl<Sc> Decrypter<Sc> {
             role,
             key: None,
             iv: None,
+            decrypt_local: false,
             transcript: Transcript::default(),
             queue: Vec::default(),
             state: DecryptState::Init { ghash },
@@ -269,9 +270,18 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
-    pub fn set_key_and_iv(&mut self, key: Option<Vec<u8>>, iv: Option<Vec<u8>>) {
-        self.key = key;
-        self.iv = iv;
+    pub fn set_key_and_iv(
+        &mut self,
+        key: Option<Vec<u8>>,
+        iv: Option<Vec<u8>>,
+    ) -> Result<(), MpcTlsError> {
+        let DecryptState::Ready(ref mut aes) = self.state else {
+            return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
+        };
+
+        aes.set_key_and_iv(key, iv);
+        self.decrypt_local = true;
+        Ok(())
     }
 
     pub async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
@@ -331,12 +341,11 @@ impl<Sc> Decrypter<Sc> {
             typs.push(typ);
         }
 
-        let (messages, plaintext_refs) =
-            if let (Some(key), Some(iv)) = (self.key.clone(), self.iv.clone()) {
-                aes.decrypt_local(vm, ctx, key, iv, decrypts).await?
-            } else {
-                aes.decrypt(vm, ctx, decrypts).await?
-            };
+        let (messages, plaintext_refs) = if self.decrypt_local {
+            aes.decrypt_local(vm, ctx, decrypts).await?
+        } else {
+            aes.decrypt(vm, ctx, decrypts).await?
+        };
 
         //TODO: Prove that plaintext encrypts to ciphertext
 
@@ -362,12 +371,11 @@ impl<Sc> Decrypter<Sc> {
         };
         let (decrypt, typ) = Self::prepare_decrypt(&mut self.transcript, message)?;
 
-        let (messages, mut plaintext_refs) =
-            if let (Some(key), Some(iv)) = (self.key.clone(), self.iv.clone()) {
-                aes.decrypt_local(vm, ctx, key, iv, vec![decrypt]).await?
-            } else {
-                aes.decrypt(vm, ctx, vec![decrypt]).await?
-            };
+        let (messages, mut plaintext_refs) = if self.decrypt_local {
+            aes.decrypt_local(vm, ctx, vec![decrypt]).await?
+        } else {
+            aes.decrypt(vm, ctx, vec![decrypt]).await?
+        };
 
         let plaintext_ref = plaintext_refs
             .pop()

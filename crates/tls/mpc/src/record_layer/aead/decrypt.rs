@@ -27,6 +27,8 @@ use tracing::instrument;
 
 pub(crate) struct AesGcmDecrypt {
     role: TlsRole,
+    key: Option<Vec<u8>>,
+    iv: Option<Vec<u8>>,
     keystream: Keystream<Aes128>,
     ghash: GhashCompute,
 }
@@ -42,9 +44,22 @@ impl AesGcmDecrypt {
     pub(crate) fn new(role: TlsRole, keystream: Keystream<Aes128>, ghash: GhashCompute) -> Self {
         Self {
             role,
+            key: None,
+            iv: None,
             keystream,
             ghash,
         }
+    }
+
+    /// Sets key and iv if available, for local decryption of the leader.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Some key for the leader, None for follower.
+    /// * `iv` - Some iv for the leader, None for follower.
+    pub(crate) fn set_key_and_iv(&mut self, key: Option<Vec<u8>>, iv: Option<Vec<u8>>) {
+        self.key = key;
+        self.iv = iv;
     }
 
     /// Decrypts a ciphertext.
@@ -129,24 +144,20 @@ impl AesGcmDecrypt {
     ///
     /// * `vm` - A virtual machine for 2PC.
     /// * `ctx` - The context for IO.
-    /// * `key` - The key for the decryption operation.
-    /// * `iv` - The iv for the decryption operation.
     /// * `requests` - Decryption requests.
     #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn decrypt_local<V, Ctx>(
         &mut self,
         vm: &mut V,
         ctx: &mut Ctx,
-        key: Vec<u8>,
-        iv: Vec<u8>,
         requests: Vec<DecryptRequest>,
     ) -> Result<(Option<Vec<PlainMessage>>, Vec<Vector<U8>>), MpcTlsError>
     where
-        V: Vm<Binary> + View<Binary>,
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
         Ctx: Context,
     {
         let len = requests.len();
-        let mut decrypt = Decrypt::new(self.role, self.ghash.clone(), len);
+        let mut decrypt = DecryptLocal::new(self.role, self.ghash.clone(), len);
         let mut plaintext_refs = Vec::with_capacity(len);
 
         for DecryptRequest {
@@ -159,16 +170,49 @@ impl AesGcmDecrypt {
             purported_tag,
         } in requests
         {
-            let j0 = Self::aes_ctr_local(&key, &iv, 1, &explicit_nonce, &[0; 16])?;
-            let plaintext = Self::aes_ctr_local(
-                &key,
-                &iv,
-                START_COUNTER as usize,
-                &explicit_nonce,
-                &ciphertext,
-            )?;
+            let (j0, plaintext) = match self.role {
+                TlsRole::Leader => {
+                    let key = self.key.as_ref().expect("Leader should have key");
+                    let iv = self.iv.as_ref().expect("Leaders hould have iv");
+                    let j0 = Self::aes_ctr_local(key, iv, 1, &explicit_nonce, &[0; 16])?;
+                    let plaintext = Self::aes_ctr_local(
+                        &key,
+                        &iv,
+                        START_COUNTER as usize,
+                        &explicit_nonce,
+                        &ciphertext,
+                    )?;
+                    (Some(j0), Some(plaintext))
+                }
+                TlsRole::Follower => (None, None),
+            };
+            let plaintext_ref: Vector<U8> =
+                vm.alloc_vec(ciphertext.len()).map_err(MpcTlsError::vm)?;
+
+            match visibility {
+                Visibility::Private => match self.role {
+                    TlsRole::Leader => vm.mark_private(plaintext_ref).map_err(MpcTlsError::vm)?,
+                    TlsRole::Follower => vm.mark_blind(plaintext_ref).map_err(MpcTlsError::vm)?,
+                },
+                Visibility::Public => vm.mark_public(plaintext_ref).map_err(MpcTlsError::vm)?,
+            }
+            if let Some(plaintext) = plaintext.clone() {
+                vm.assign(plaintext_ref, plaintext)
+                    .map_err(MpcTlsError::vm)?;
+            }
+            vm.commit(plaintext_ref).map_err(MpcTlsError::vm)?;
+
+            decrypt.push(j0, ciphertext, plaintext, typ, version, aad, purported_tag);
+            plaintext_refs.push(plaintext_ref);
         }
-        todo!()
+
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        let messages = decrypt.compute(ctx).await?;
+
+        Ok((messages, plaintext_refs))
     }
 
     fn aes_ctr_local(
@@ -318,8 +362,11 @@ impl Decrypt {
 pub(crate) struct DecryptLocal {
     role: TlsRole,
     ghash: GhashCompute,
-    j0s: Vec<Vec<u8>>,
+    j0s: Option<Vec<Vec<u8>>>,
     ciphertexts: Vec<Vec<u8>>,
+    plaintexts: Option<Vec<Vec<u8>>>,
+    typs: Vec<ContentType>,
+    versions: Vec<ProtocolVersion>,
     aads: Vec<[u8; 13]>,
     purported_tags: Vec<Tag>,
 }
@@ -327,11 +374,19 @@ pub(crate) struct DecryptLocal {
 impl DecryptLocal {
     /// Creates a new instance.
     pub(crate) fn new(role: TlsRole, ghash: GhashCompute, cap: usize) -> Self {
+        let (j0s, plaintexts) = match role {
+            TlsRole::Leader => (Some(Vec::with_capacity(cap)), Some(Vec::with_capacity(cap))),
+            TlsRole::Follower => (None, None),
+        };
+
         Self {
             role,
             ghash,
-            j0s: Vec::with_capacity(cap),
+            j0s,
             ciphertexts: Vec::with_capacity(cap),
+            plaintexts,
+            typs: Vec::with_capacity(cap),
+            versions: Vec::with_capacity(cap),
             aads: Vec::with_capacity(cap),
             purported_tags: Vec::with_capacity(cap),
         }
@@ -340,16 +395,27 @@ impl DecryptLocal {
     /// Adds a decrypt operation.
     pub(crate) fn push(
         &mut self,
-        j0: Vec<u8>,
+        j0: Option<Vec<u8>>,
         ciphertext: Vec<u8>,
-        decode: DecryptDecode,
+        plaintext: Option<Vec<u8>>,
         typ: ContentType,
         version: ProtocolVersion,
         aad: [u8; 13],
         purported_tag: Tag,
     ) {
-        self.j0s.push(j0);
+        if let Some(j0) = j0 {
+            self.j0s.as_mut().map(|j0s| j0s.push(j0));
+        }
+
+        if let Some(plaintext) = plaintext {
+            self.plaintexts
+                .as_mut()
+                .map(|plaintexts| plaintexts.push(plaintext));
+        }
+
         self.ciphertexts.push(ciphertext);
+        self.typs.push(typ);
+        self.versions.push(version);
         self.aads.push(aad);
         self.purported_tags.push(purported_tag);
     }
