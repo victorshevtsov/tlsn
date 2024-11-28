@@ -336,8 +336,11 @@ where
             visibility: Visibility::Public,
         };
 
-        let msg = self.decrypter.decrypt(vm, ctx, msg).await?;
-        let msg = msg.expect("Leader should recieve some message");
+        let msg = self.decrypter.decrypt(vm, ctx, vec![msg]).await?;
+        let msg = msg
+            .expect("Leader should recieve some message")
+            .pop()
+            .expect("Should contain a message");
 
         self.state = State::Active(Active { data });
 
@@ -361,8 +364,11 @@ where
             visibility: Visibility::Public,
         };
 
-        let msg = self.decrypter.decrypt(vm, ctx, msg).await?;
-        let msg = msg.expect("Leader should recieve some message");
+        let msg = self.decrypter.decrypt(vm, ctx, vec![msg]).await?;
+        let msg = msg
+            .expect("Leader should recieve some message")
+            .pop()
+            .expect("Should contain a message");
 
         Ok(msg)
     }
@@ -387,8 +393,11 @@ where
             visibility: Visibility::Private,
         };
 
-        let msg = self.decrypter.decrypt(vm, ctx, msg).await?;
-        let msg = msg.expect("Leader should recieve some message");
+        let msg = self.decrypter.decrypt(vm, ctx, vec![msg]).await?;
+        let msg = msg
+            .expect("Leader should recieve some message")
+            .pop()
+            .expect("Should contain a message");
 
         Ok(msg)
     }
@@ -407,6 +416,10 @@ where
         self.committed = true;
 
         if !self.buffer.is_empty() {
+            self.buffer.make_contiguous();
+            self.decrypter
+                .verify_tags(&mut self.vm, &mut self.ctx, self.buffer.as_slices().0)
+                .await?;
             self.decode_key().await?;
             self.is_decrypting = true;
             self.notifier.set();
@@ -451,8 +464,6 @@ where
     pub async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
-
-        //TODO: Do Tag verification here
 
         let key = self.cipher.key().map_err(MpcTlsError::cipher)?;
         let key = transmute(key);

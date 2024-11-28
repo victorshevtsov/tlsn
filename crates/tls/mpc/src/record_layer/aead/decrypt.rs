@@ -64,7 +64,7 @@ impl AesGcmDecrypt {
 
     /// Decrypts a ciphertext.
     ///
-    /// Returns [`Decrypt`] and plaintext refs.
+    /// Returns the plaintext and plaintext refs. Also verifies tags.
     ///
     /// # Arguments
     ///
@@ -138,26 +138,29 @@ impl AesGcmDecrypt {
 
     /// Decrypts a ciphertext locally.
     ///
-    /// Returns [`DecryptLocal`].
+    /// Returns plain messages, if available, and plaintext refs.
     ///
     /// # Arguments
     ///
     /// * `vm` - A virtual machine for 2PC.
-    /// * `ctx` - The context for IO.
     /// * `requests` - Decryption requests.
     #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn decrypt_local<V, Ctx>(
         &mut self,
         vm: &mut V,
-        ctx: &mut Ctx,
         requests: Vec<DecryptRequest>,
     ) -> Result<(Option<Vec<PlainMessage>>, Vec<Vector<U8>>), MpcTlsError>
     where
         V: Vm<Binary> + View<Binary> + Execute<Ctx>,
         Ctx: Context,
     {
+        // Tag verification was already done, so we only decrypt locally.
         let len = requests.len();
-        let mut decrypt = DecryptLocal::new(self.role, self.ghash.clone(), len);
+        let mut plaintexts = match self.role {
+            TlsRole::Leader => Some(Vec::with_capacity(len)),
+            TlsRole::Follower => None,
+        };
+
         let mut plaintext_refs = Vec::with_capacity(len);
 
         for DecryptRequest {
@@ -166,15 +169,13 @@ impl AesGcmDecrypt {
             visibility,
             version,
             explicit_nonce,
-            aad,
-            purported_tag,
+            ..
         } in requests
         {
-            let (j0, plaintext) = match self.role {
+            let plaintext = match self.role {
                 TlsRole::Leader => {
                     let key = self.key.as_ref().expect("Leader should have key");
                     let iv = self.iv.as_ref().expect("Leaders hould have iv");
-                    let j0 = Self::aes_ctr_local(key, iv, 1, &explicit_nonce, &[0; 16])?;
                     let plaintext = Self::aes_ctr_local(
                         &key,
                         &iv,
@@ -182,9 +183,9 @@ impl AesGcmDecrypt {
                         &explicit_nonce,
                         &ciphertext,
                     )?;
-                    (Some(j0), Some(plaintext))
+                    Some(plaintext)
                 }
-                TlsRole::Follower => (None, None),
+                TlsRole::Follower => None,
             };
             let plaintext_ref: Vector<U8> =
                 vm.alloc_vec(ciphertext.len()).map_err(MpcTlsError::vm)?;
@@ -196,23 +197,88 @@ impl AesGcmDecrypt {
                 },
                 Visibility::Public => vm.mark_public(plaintext_ref).map_err(MpcTlsError::vm)?,
             }
-            if let Some(plaintext) = plaintext.clone() {
-                vm.assign(plaintext_ref, plaintext)
+            if let Some(plaintext) = plaintext {
+                vm.assign(plaintext_ref, plaintext.clone())
                     .map_err(MpcTlsError::vm)?;
-            }
-            vm.commit(plaintext_ref).map_err(MpcTlsError::vm)?;
 
-            decrypt.push(j0, ciphertext, plaintext, typ, version, aad, purported_tag);
+                match plaintexts.as_mut() {
+                    Some(plaintexts) => {
+                        let plaintext = PlainMessage {
+                            typ,
+                            version,
+                            payload: Payload(plaintext),
+                        };
+
+                        plaintexts.push(plaintext);
+                    }
+                    None => (),
+                }
+                vm.commit(plaintext_ref).map_err(MpcTlsError::vm)?;
+            }
             plaintext_refs.push(plaintext_ref);
+        }
+
+        Ok((plaintexts, plaintext_refs))
+    }
+
+    /// Verifies tags of ciphertexts.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - A virtual machine for 2PC.
+    /// * `ctx` - The context for IO.
+    /// * `requests` - Decryption requests.
+    #[instrument(level = "trace", skip_all, err)]
+    pub(crate) async fn verify_tags<V, Ctx>(
+        &mut self,
+        vm: &mut V,
+        ctx: &mut Ctx,
+        requests: Vec<DecryptRequest>,
+    ) -> Result<(), MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
+    {
+        let len = requests.len();
+
+        let mut j0s = Vec::with_capacity(len);
+        let mut ciphertexts = Vec::with_capacity(len);
+        let mut aads = Vec::with_capacity(len);
+        let mut purported_tags = Vec::with_capacity(len);
+
+        for DecryptRequest {
+            ciphertext,
+            explicit_nonce,
+            aad,
+            purported_tag,
+            ..
+        } in requests
+        {
+            let j0 = self.keystream.j0(vm, explicit_nonce)?;
+            let j0 = Decode::new(vm, self.role, transmute(j0))?;
+            let j0 = j0.shared(vm)?;
+
+            j0s.push(j0);
+            ciphertexts.push(ciphertext);
+            aads.push(aad);
+            purported_tags.push(purported_tag);
         }
 
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
-        let messages = decrypt.compute(ctx).await?;
+        let mut future: FuturesOrdered<_> = j0s.into_iter().map(|j0| j0.decode()).collect();
+        let mut j0s = Vec::with_capacity(len);
+        while let Some(j0) = future.next().await {
+            j0s.push(j0?);
+        }
 
-        Ok((messages, plaintext_refs))
+        let tags = TagComputer::new(j0s, ciphertexts, aads).compute(&self.ghash)?;
+        tags.verify(ctx, self.role, TagBatch::new(purported_tags))
+            .await?;
+
+        Ok(())
     }
 
     fn aes_ctr_local(
@@ -307,7 +373,7 @@ impl Decrypt {
         self.ciphertexts.len()
     }
 
-    /// Computes the plaintext.
+    /// Computes the plaintext and verifies tags.
     ///
     /// # Arguments
     ///
@@ -355,84 +421,6 @@ impl Decrypt {
             .collect();
 
         Ok(output)
-    }
-}
-
-/// A struct for local decryption operations.
-pub(crate) struct DecryptLocal {
-    role: TlsRole,
-    ghash: GhashCompute,
-    j0s: Option<Vec<Vec<u8>>>,
-    ciphertexts: Vec<Vec<u8>>,
-    plaintexts: Option<Vec<Vec<u8>>>,
-    typs: Vec<ContentType>,
-    versions: Vec<ProtocolVersion>,
-    aads: Vec<[u8; 13]>,
-    purported_tags: Vec<Tag>,
-}
-
-impl DecryptLocal {
-    /// Creates a new instance.
-    pub(crate) fn new(role: TlsRole, ghash: GhashCompute, cap: usize) -> Self {
-        let (j0s, plaintexts) = match role {
-            TlsRole::Leader => (Some(Vec::with_capacity(cap)), Some(Vec::with_capacity(cap))),
-            TlsRole::Follower => (None, None),
-        };
-
-        Self {
-            role,
-            ghash,
-            j0s,
-            ciphertexts: Vec::with_capacity(cap),
-            plaintexts,
-            typs: Vec::with_capacity(cap),
-            versions: Vec::with_capacity(cap),
-            aads: Vec::with_capacity(cap),
-            purported_tags: Vec::with_capacity(cap),
-        }
-    }
-
-    /// Adds a decrypt operation.
-    pub(crate) fn push(
-        &mut self,
-        j0: Option<Vec<u8>>,
-        ciphertext: Vec<u8>,
-        plaintext: Option<Vec<u8>>,
-        typ: ContentType,
-        version: ProtocolVersion,
-        aad: [u8; 13],
-        purported_tag: Tag,
-    ) {
-        if let Some(j0) = j0 {
-            self.j0s.as_mut().map(|j0s| j0s.push(j0));
-        }
-
-        if let Some(plaintext) = plaintext {
-            self.plaintexts
-                .as_mut()
-                .map(|plaintexts| plaintexts.push(plaintext));
-        }
-
-        self.ciphertexts.push(ciphertext);
-        self.typs.push(typ);
-        self.versions.push(version);
-        self.aads.push(aad);
-        self.purported_tags.push(purported_tag);
-    }
-
-    /// Computes the plaintext.
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - The context for IO.
-    pub(crate) async fn compute<Ctx>(
-        self,
-        ctx: &mut Ctx,
-    ) -> Result<Option<Vec<PlainMessage>>, MpcTlsError>
-    where
-        Ctx: Context,
-    {
-        todo!()
     }
 }
 

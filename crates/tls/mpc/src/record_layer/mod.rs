@@ -213,7 +213,6 @@ pub struct Decrypter<Sc> {
     role: TlsRole,
     decrypt_local: bool,
     transcript: Transcript,
-    queue: Vec<DecryptRecord>,
     state: DecryptState<Sc>,
 }
 
@@ -223,7 +222,6 @@ impl<Sc> Decrypter<Sc> {
             role,
             decrypt_local: false,
             transcript: Transcript::default(),
-            queue: Vec::default(),
             state: DecryptState::Init { ghash },
         }
     }
@@ -308,14 +306,41 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
-    pub fn enqueue(&mut self, decrypt: DecryptRecord) {
-        self.queue.push(decrypt);
-    }
-
-    pub async fn decrypt_all<V, Ctx>(
+    pub async fn verify_tags<V, Ctx>(
         &mut self,
         vm: &mut V,
         ctx: &mut Ctx,
+        messages: &[OpaqueMessage],
+    ) -> Result<(), MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
+    {
+        let DecryptState::Ready(ref mut aes) = self.state else {
+            return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
+        };
+        let mut decrypts = Vec::with_capacity(messages.len());
+
+        for msg in messages.iter().cloned() {
+            let visibility = match msg.typ {
+                ContentType::ApplicationData => Visibility::Private,
+                _ => Visibility::Public,
+            };
+            let message = DecryptRecord { msg, visibility };
+            let (decrypt, _) = Self::prepare_decrypt(&mut self.transcript, message)?;
+
+            decrypts.push(decrypt);
+        }
+
+        aes.verify_tags(vm, ctx, decrypts).await?;
+        Ok(())
+    }
+
+    pub async fn decrypt<V, Ctx>(
+        &mut self,
+        vm: &mut V,
+        ctx: &mut Ctx,
+        messages: Vec<DecryptRecord>,
     ) -> Result<Option<Vec<PlainMessage>>, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary> + Execute<Ctx>,
@@ -325,12 +350,10 @@ impl<Sc> Decrypter<Sc> {
             return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
         };
 
-        let decrypt_records = std::mem::take(&mut self.queue);
+        let mut decrypts = Vec::with_capacity(messages.len());
+        let mut typs = Vec::with_capacity(messages.len());
 
-        let mut decrypts = Vec::with_capacity(decrypt_records.len());
-        let mut typs = Vec::with_capacity(decrypt_records.len());
-
-        for message in decrypt_records {
+        for message in messages {
             let (decrypt, typ) = Self::prepare_decrypt(&mut self.transcript, message)?;
 
             decrypts.push(decrypt);
@@ -338,7 +361,7 @@ impl<Sc> Decrypter<Sc> {
         }
 
         let (messages, plaintext_refs) = if self.decrypt_local {
-            aes.decrypt_local(vm, ctx, decrypts).await?
+            aes.decrypt_local(vm, decrypts).await?
         } else {
             aes.decrypt(vm, ctx, decrypts).await?
         };
@@ -350,40 +373,6 @@ impl<Sc> Decrypter<Sc> {
         }
 
         Ok(messages)
-    }
-
-    pub async fn decrypt<V, Ctx>(
-        &mut self,
-        vm: &mut V,
-        ctx: &mut Ctx,
-        message: DecryptRecord,
-    ) -> Result<Option<PlainMessage>, MpcTlsError>
-    where
-        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
-        Ctx: Context,
-    {
-        let DecryptState::Ready(ref mut aes) = self.state else {
-            return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
-        };
-        let (decrypt, typ) = Self::prepare_decrypt(&mut self.transcript, message)?;
-
-        let (messages, mut plaintext_refs) = if self.decrypt_local {
-            aes.decrypt_local(vm, ctx, vec![decrypt]).await?
-        } else {
-            aes.decrypt(vm, ctx, vec![decrypt]).await?
-        };
-
-        let plaintext_ref = plaintext_refs
-            .pop()
-            .expect("Plaintext references should not be empty");
-
-        let message =
-            messages.map(|mut m| m.pop().expect("Should contain at least one opaque message"));
-
-        //TODO: Prove that plaintext encrypts to ciphertext
-
-        self.transcript.record(typ, plaintext_ref);
-        Ok(message)
     }
 
     fn prepare_decrypt(
