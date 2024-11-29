@@ -34,7 +34,7 @@ pub struct Encrypter<Sc> {
 }
 
 impl<Sc> Encrypter<Sc> {
-    pub fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
+    pub(crate) fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
         Self {
             role,
             transcript: Transcript::default(),
@@ -42,7 +42,7 @@ impl<Sc> Encrypter<Sc> {
         }
     }
 
-    pub fn alloc(&mut self) -> Result<(), MpcTlsError>
+    pub(crate) fn alloc(&mut self) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128>,
         Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
@@ -56,7 +56,7 @@ impl<Sc> Encrypter<Sc> {
         Ok(())
     }
 
-    pub fn prepare(
+    pub(crate) fn prepare(
         &mut self,
         keystream: Keystream<Aes128>,
         ghash_key: OneTimePadShared,
@@ -75,11 +75,11 @@ impl<Sc> Encrypter<Sc> {
     }
 
     /// Returns the number of sent bytes.
-    pub fn sent_bytes(&self) -> usize {
+    pub(crate) fn sent_bytes(&self) -> usize {
         self.transcript.size()
     }
 
-    pub async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
+    pub(crate) async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
         Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
@@ -107,7 +107,7 @@ impl<Sc> Encrypter<Sc> {
         Ok(())
     }
 
-    pub async fn encrypt<V, Ctx>(
+    pub(crate) async fn encrypt<V, Ctx>(
         &mut self,
         vm: &mut V,
         ctx: &mut Ctx,
@@ -217,7 +217,7 @@ pub struct Decrypter<Sc> {
 }
 
 impl<Sc> Decrypter<Sc> {
-    pub fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
+    pub(crate) fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
         Self {
             role,
             decrypt_local: false,
@@ -226,7 +226,7 @@ impl<Sc> Decrypter<Sc> {
         }
     }
 
-    pub fn alloc(&mut self) -> Result<(), MpcTlsError>
+    pub(crate) fn alloc(&mut self) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128>,
         Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
@@ -241,11 +241,11 @@ impl<Sc> Decrypter<Sc> {
     }
 
     /// Returns the number of received bytes.
-    pub fn recv_bytes(&self) -> usize {
+    pub(crate) fn recv_bytes(&self) -> usize {
         self.transcript.size()
     }
 
-    pub fn prepare(
+    pub(crate) fn prepare(
         &mut self,
         keystream_mpc: Keystream<Aes128>,
         keystream_zk: Keystream<Aes128>,
@@ -266,7 +266,7 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
-    pub fn set_key_and_iv(
+    pub(crate) fn set_key_and_iv(
         &mut self,
         key: Option<Vec<u8>>,
         iv: Option<Vec<u8>>,
@@ -280,7 +280,7 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
-    pub async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
+    pub(crate) async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
         Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
@@ -309,7 +309,7 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
-    pub async fn verify_tags<V, Ctx>(
+    pub(crate) async fn verify_tags<V, Ctx>(
         &mut self,
         vm: &mut V,
         ctx: &mut Ctx,
@@ -341,7 +341,7 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
-    pub async fn decrypt_public<V, Ctx>(
+    pub(crate) async fn decrypt_public<V, Ctx>(
         &mut self,
         vm: &mut V,
         ctx: &mut Ctx,
@@ -374,7 +374,7 @@ impl<Sc> Decrypter<Sc> {
         Ok(messages)
     }
 
-    pub async fn decrypt_private<V, Ctx>(
+    pub(crate) async fn decrypt_private<V, Ctx>(
         &mut self,
         vm: &mut V,
         ctx: &mut Ctx,

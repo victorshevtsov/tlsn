@@ -18,7 +18,7 @@ pub struct MpcTlsFollowerCtrl {
 }
 
 impl MpcTlsFollowerCtrl {
-    /// Creates a new control for [`MpcTlsLeader`].
+    /// Creates a new control for [`MpcTlsFollower`].
     pub fn new(address: Address<MpcTlsFollowerMsg>) -> Self {
         Self { address }
     }

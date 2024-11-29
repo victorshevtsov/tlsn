@@ -14,7 +14,7 @@ pub(crate) mod ghash;
 
 const START_COUNTER: u32 = 2;
 
-pub fn transmute<T>(value: T) -> Vector<U8>
+pub(crate) fn transmute<T>(value: T) -> Vector<U8>
 where
     T: StaticSize<Binary> + ToRaw,
 {

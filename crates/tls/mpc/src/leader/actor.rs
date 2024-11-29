@@ -1,6 +1,5 @@
-use super::{MpcTlsData, MpcTlsLeader};
 use crate::{
-    leader::state,
+    leader::{state, MpcTlsData, MpcTlsLeader},
     msg::leader::{
         BackendMsgBufferIncoming, BackendMsgBufferLen, BackendMsgDecrypt, BackendMsgEncrypt,
         BackendMsgGetClientFinishedVd, BackendMsgGetClientKeyShare, BackendMsgGetClientRandom,
@@ -15,12 +14,15 @@ use crate::{
     MpcTlsError,
 };
 use async_trait::async_trait;
+use cipher::{aes::Aes128, Cipher};
 use hmac_sha256::Prf;
 use key_exchange::KeyExchange;
 use ludi::{mailbox, Actor, Address, Context as LudiCtx, Dispatch, Handler, Message};
-use mpz_common::Context;
+use mpz_common::{Context, Flush};
+use mpz_fields::gf2_128::Gf2_128;
 use mpz_memory_core::{binary::Binary, Memory, View};
-use mpz_vm_core::Vm;
+use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
+use mpz_vm_core::{Execute, Vm};
 use std::future::Future;
 use tls_backend::{Backend, BackendError, BackendNotify, DecryptMode, EncryptMode};
 use tls_core::{
@@ -48,21 +50,23 @@ impl MpcTlsLeaderCtrl {
     }
 }
 
-impl<K, P, C, Ctx, V> MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     /// Runs the leader actor.
     ///
     /// Returns a control handle and a future that resolves when the actor is
     /// stopped.
     ///
-    //V: Vm<Binary> + View<Binary> + Memory<Binary> + Send, 'c: 'a + 'b
     /// # Note
     ///
     /// The future must be polled continuously to make progress.
@@ -81,14 +85,17 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Actor for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Actor for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     type Stop = MpcTlsData;
     type Error = MpcTlsError;
@@ -102,19 +109,22 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for MpcTlsLeaderMsg
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for MpcTlsLeaderMsg
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) {
         match self {
@@ -480,33 +490,41 @@ impl MpcTlsLeaderCtrl {
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetProtocolVersion
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
+    for BackendMsgSetProtocolVersion
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetProtocolVersion> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetProtocolVersion>
+    for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -517,33 +535,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetCipherSuite
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgSetCipherSuite
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetCipherSuite> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetCipherSuite> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -554,33 +578,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetSuite
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgGetSuite
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgGetSuite> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetSuite> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -591,33 +621,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetEncrypt
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgSetEncrypt
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetEncrypt> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetEncrypt> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -628,33 +664,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetDecrypt
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgSetDecrypt
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetDecrypt> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetDecrypt> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -665,33 +707,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetClientRandom
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgGetClientRandom
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgGetClientRandom> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetClientRandom> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -702,33 +750,40 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetClientKeyShare
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
+    for BackendMsgGetClientKeyShare
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgGetClientKeyShare> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetClientKeyShare> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -739,33 +794,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetServerRandom
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgSetServerRandom
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetServerRandom> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetServerRandom> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -776,33 +837,40 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetServerKeyShare
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
+    for BackendMsgSetServerKeyShare
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetServerKeyShare> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetServerKeyShare> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -813,33 +881,41 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetServerCertDetails
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
+    for BackendMsgSetServerCertDetails
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetServerCertDetails> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetServerCertDetails>
+    for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -850,33 +926,41 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetServerKxDetails
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
+    for BackendMsgSetServerKxDetails
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetServerKxDetails> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetServerKxDetails>
+    for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -887,35 +971,41 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>>
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
     for BackendMsgSetHsHashClientKeyExchange
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetHsHashClientKeyExchange>
-    for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetHsHashClientKeyExchange>
+    for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -926,33 +1016,41 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgSetHsHashServerHello
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
+    for BackendMsgSetHsHashServerHello
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgSetHsHashServerHello> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetHsHashServerHello>
+    for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -963,33 +1061,41 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetServerFinishedVd
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
+    for BackendMsgGetServerFinishedVd
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgGetServerFinishedVd> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetServerFinishedVd>
+    for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1000,33 +1106,41 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetClientFinishedVd
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
+    for BackendMsgGetClientFinishedVd
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgGetClientFinishedVd> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetClientFinishedVd>
+    for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1037,33 +1151,40 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgPrepareEncryption
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
+    for BackendMsgPrepareEncryption
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgPrepareEncryption> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgPrepareEncryption> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1074,33 +1195,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgEncrypt
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgEncrypt
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgEncrypt> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgEncrypt> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1111,33 +1238,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgDecrypt
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgDecrypt
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgDecrypt> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgDecrypt> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1148,33 +1281,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgBufferIncoming
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgBufferIncoming
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgBufferIncoming> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgBufferIncoming> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1185,33 +1324,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgNextIncoming
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgNextIncoming
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgNextIncoming> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgNextIncoming> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1222,33 +1367,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgGetNotify
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgGetNotify
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgGetNotify> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetNotify> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1259,33 +1410,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgBufferLen
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgBufferLen
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgBufferLen> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgBufferLen> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1296,33 +1453,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for BackendMsgServerClosed
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for BackendMsgServerClosed
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<BackendMsgServerClosed> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgServerClosed> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1333,33 +1496,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for DeferDecryption
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for DeferDecryption
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<DeferDecryption> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<DeferDecryption> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1370,33 +1539,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for CloseConnection
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for CloseConnection
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<CloseConnection> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<CloseConnection> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,
@@ -1407,33 +1582,39 @@ where
     }
 }
 
-impl<K, P, C, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Ctx, V>> for Commit
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Commit
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsLeader<K, P, C, Ctx, V>,
-        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Ctx, V>>,
+        actor: &mut MpcTlsLeader<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiCtx<MpcTlsLeader<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl<K, P, C, Ctx, V> Handler<Commit> for MpcTlsLeader<K, P, C, Ctx, V>
+impl<K, P, C, Sc, Ctx, V> Handler<Commit> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
-    K: KeyExchange<V> + Send,
-    P: Prf<V> + Send,
-    C: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     async fn handle(
         &mut self,

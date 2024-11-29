@@ -29,8 +29,9 @@ pub use config::{
     TranscriptConfig, TranscriptConfigBuilder, TranscriptConfigBuilderError,
 };
 pub use error::MpcTlsError;
-//pub use follower::{FollowerCtrl, MpcTlsFollower, MpcTlsFollowerData};
-//pub use leader::{LeaderCtrl, MpcTlsData, MpcTlsLeader};
+pub use follower::FollowerCtrl;
+pub use follower::{MpcTlsFollower, MpcTlsFollowerData};
+pub use leader::{LeaderCtrl, MpcTlsData, MpcTlsLeader};
 use tls_core::msgs::message::{OpaqueMessage, PlainMessage};
 use utils_aio::duplex::Duplex;
 

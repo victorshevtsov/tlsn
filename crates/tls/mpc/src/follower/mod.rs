@@ -36,11 +36,11 @@ use tls_core::{
 };
 use tracing::{debug, instrument};
 
-// mod actor;
-// use actor::MpcTlsFollowerCtrl;
+mod actor;
+use actor::MpcTlsFollowerCtrl;
 
 /// Controller for MPC-TLS follower.
-// pub type FollowerCtrl = MpcTlsFollowerCtrl;
+pub type FollowerCtrl = MpcTlsFollowerCtrl;
 
 /// MPC-TLS follower.
 pub struct MpcTlsFollower<K, P, C, Sc, Ctx, V> {
@@ -577,7 +577,7 @@ where
         Ok(())
     }
 
-    pub async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
+    async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
 
@@ -594,7 +594,7 @@ where
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
         let (key, iv) = futures::try_join!(key.decode(), iv.decode())?;
-        self.decrypter.set_key_and_iv(key, iv);
+        self.decrypter.set_key_and_iv(key, iv)?;
 
         Ok(())
     }

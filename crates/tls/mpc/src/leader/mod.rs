@@ -45,11 +45,11 @@ use tls_core::{
 };
 use tracing::{debug, instrument, trace};
 
-//mod actor;
-//use actor::MpcTlsLeaderCtrl;
+mod actor;
+use actor::MpcTlsLeaderCtrl;
 
 /// Controller for MPC-TLS leader.
-//pub type LeaderCtrl = MpcTlsLeaderCtrl;
+pub type LeaderCtrl = MpcTlsLeaderCtrl;
 
 /// MPC-TLS leader.
 pub struct MpcTlsLeader<K, P, C, Sc, Ctx, V> {
@@ -91,6 +91,7 @@ where
     Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     /// Create a new leader instance
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: MpcTlsLeaderConfig,
         channel: MpcTlsChannel,
@@ -471,7 +472,7 @@ where
         Ok(())
     }
 
-    pub async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
+    async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
 
@@ -488,7 +489,7 @@ where
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
         let (key, iv) = futures::try_join!(key.decode(), iv.decode())?;
-        self.decrypter.set_key_and_iv(key, iv);
+        self.decrypter.set_key_and_iv(key, iv)?;
 
         Ok(())
     }
