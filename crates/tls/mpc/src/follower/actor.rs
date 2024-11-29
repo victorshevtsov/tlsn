@@ -7,8 +7,16 @@ use crate::{
     },
     MpcTlsError,
 };
+use cipher::{aes::Aes128, Cipher};
 use futures::{FutureExt, StreamExt};
+use hmac_sha256::Prf;
+use key_exchange::KeyExchange;
 use ludi::{Address, Dispatch, Handler, Message};
+use mpz_common::{Context, Flush};
+use mpz_fields::gf2_128::Gf2_128;
+use mpz_memory_core::{binary::Binary, Memory, View};
+use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
+use mpz_vm_core::{Execute, Vm};
 use std::future::Future;
 use tracing::{debug, Instrument};
 
@@ -24,7 +32,18 @@ impl MpcTlsFollowerCtrl {
     }
 }
 
-impl ludi::Actor for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> ludi::Actor for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     type Stop = MpcTlsFollowerData;
     type Error = MpcTlsError;
 
@@ -44,7 +63,18 @@ impl ludi::Actor for MpcTlsFollower {
     }
 }
 
-impl MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     /// Runs the follower actor.
     ///
     /// Returns a control handle and a future that resolves when the actor is
@@ -96,18 +126,40 @@ impl MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for ComputeKeyExchange {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for ComputeKeyExchange
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<ComputeKeyExchange> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<ComputeKeyExchange> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn handle(
         &mut self,
         msg: ComputeKeyExchange,
@@ -122,18 +174,40 @@ impl Handler<ComputeKeyExchange> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for ClientFinishedVd {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for ClientFinishedVd
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<ClientFinishedVd> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<ClientFinishedVd> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         msg: ClientFinishedVd,
@@ -144,18 +218,40 @@ impl Handler<ClientFinishedVd> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for ServerFinishedVd {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for ServerFinishedVd
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<ServerFinishedVd> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<ServerFinishedVd> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         msg: ServerFinishedVd,
@@ -166,18 +262,40 @@ impl Handler<ServerFinishedVd> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for EncryptClientFinished {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for EncryptClientFinished
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<EncryptClientFinished> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<EncryptClientFinished> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         _msg: EncryptClientFinished,
@@ -187,18 +305,40 @@ impl Handler<EncryptClientFinished> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for EncryptAlert {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for EncryptAlert
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<EncryptAlert> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<EncryptAlert> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         msg: EncryptAlert,
@@ -208,18 +348,40 @@ impl Handler<EncryptAlert> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for EncryptMessage {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for EncryptMessage
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<EncryptMessage> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<EncryptMessage> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         msg: EncryptMessage,
@@ -229,18 +391,40 @@ impl Handler<EncryptMessage> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for DecryptServerFinished {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for DecryptServerFinished
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<DecryptServerFinished> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<DecryptServerFinished> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         msg: DecryptServerFinished,
@@ -251,18 +435,40 @@ impl Handler<DecryptServerFinished> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for DecryptAlert {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for DecryptAlert
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<DecryptAlert> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<DecryptAlert> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         msg: DecryptAlert,
@@ -273,18 +479,40 @@ impl Handler<DecryptAlert> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for CommitMessage {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for CommitMessage
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<CommitMessage> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<CommitMessage> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         msg: CommitMessage,
@@ -295,18 +523,40 @@ impl Handler<CommitMessage> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for DecryptMessage {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for DecryptMessage
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<DecryptMessage> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<DecryptMessage> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         _msg: DecryptMessage,
@@ -316,18 +566,40 @@ impl Handler<DecryptMessage> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for CloseConnection {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for CloseConnection
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<CloseConnection> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<CloseConnection> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         _msg: CloseConnection,
@@ -339,18 +611,40 @@ impl Handler<CloseConnection> for MpcTlsFollower {
     }
 }
 
-impl Dispatch<MpcTlsFollower> for Commit {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Commit
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut ludi::Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut ludi::Context<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) -> impl std::future::Future<Output = ()> + Send {
         actor.process(self, ctx, ret)
     }
 }
 
-impl Handler<Commit> for MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> Handler<Commit> for MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn handle(
         &mut self,
         _msg: Commit,

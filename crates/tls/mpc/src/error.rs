@@ -37,6 +37,8 @@ enum ErrorRepr {
     Vm(Box<dyn Error + Send + Sync + 'static>),
     /// Decoding error
     Decode(Box<dyn Error + Send + Sync + 'static>),
+    /// Actor error
+    Actor(Box<dyn Error + Send + Sync + 'static>),
     /// Other error
     Other(Box<dyn Error + Send + Sync + 'static>),
 }
@@ -56,6 +58,7 @@ impl Display for ErrorRepr {
             ErrorRepr::PeerMisbehaved(error) => write!(f, "{error}"),
             ErrorRepr::Vm(error) => write!(f, "{error}"),
             ErrorRepr::Decode(error) => write!(f, "{error}"),
+            ErrorRepr::Actor(error) => write!(f, "{error}"),
             ErrorRepr::Other(error) => write!(f, "{error}"),
         }
     }
@@ -146,6 +149,13 @@ impl MpcTlsError {
         Self(ErrorRepr::Decode(err.into()))
     }
 
+    pub(crate) fn actor<E>(err: E) -> MpcTlsError
+    where
+        E: Into<Box<dyn Error + Send + Sync + 'static>>,
+    {
+        Self(ErrorRepr::Actor(err.into()))
+    }
+
     pub(crate) fn other<E>(err: E) -> MpcTlsError
     where
         E: Into<Box<dyn Error + Send + Sync + 'static>>,
@@ -193,5 +203,11 @@ impl From<crate::record_layer::aead::ghash::UniversalHashError> for MpcTlsError 
 impl From<std::io::Error> for MpcTlsError {
     fn from(value: std::io::Error) -> Self {
         MpcTlsError::io(value)
+    }
+}
+
+impl From<ludi::Error> for MpcTlsError {
+    fn from(value: ludi::Error) -> Self {
+        MpcTlsError::actor(value)
     }
 }
