@@ -200,6 +200,10 @@ where
         vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
+        self.prf
+            .flush(ctx)
+            .await
+            .map_err(MpcTlsError::key_exchange)?;
         self.ke
             .flush(ctx)
             .await

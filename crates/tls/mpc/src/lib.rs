@@ -12,7 +12,7 @@
 mod components;
 mod config;
 mod error;
-//pub(crate) mod follower;
+pub(crate) mod follower;
 pub(crate) mod leader;
 pub mod msg;
 
