@@ -29,7 +29,8 @@ pub(crate) struct AesGcmDecrypt {
     role: TlsRole,
     key: Option<Vec<u8>>,
     iv: Option<Vec<u8>>,
-    keystream: Keystream<Aes128>,
+    keystream_mpc: Keystream<Aes128>,
+    keystream_zk: Keystream<Aes128>,
     ghash: GhashCompute,
 }
 
@@ -39,14 +40,21 @@ impl AesGcmDecrypt {
     /// # Arguments
     ///
     /// * `role` - The role of the party.
-    /// * `keystream` - The keystream for AES-GCM.
+    /// * `keystream_mpc` - The keystream for MPC AES-GCM.
+    /// * `keystream_zk` - The keystream for ZK AES-GCM.
     /// * `ghash` - An instance for computing Ghash.
-    pub(crate) fn new(role: TlsRole, keystream: Keystream<Aes128>, ghash: GhashCompute) -> Self {
+    pub(crate) fn new(
+        role: TlsRole,
+        keystream_mpc: Keystream<Aes128>,
+        keystream_zk: Keystream<Aes128>,
+        ghash: GhashCompute,
+    ) -> Self {
         Self {
             role,
             key: None,
             iv: None,
-            keystream,
+            keystream_mpc,
+            keystream_zk,
             ghash,
         }
     }
@@ -96,11 +104,11 @@ impl AesGcmDecrypt {
             purported_tag,
         } in requests
         {
-            let j0 = self.keystream.j0(vm, explicit_nonce)?;
+            let j0 = self.keystream_mpc.j0(vm, explicit_nonce)?;
             let j0 = Decode::new(vm, self.role, transmute(j0))?;
             let j0 = j0.shared(vm)?;
 
-            let keystream = self.keystream.chunk_sufficient(ciphertext.len())?;
+            let keystream = self.keystream_mpc.chunk_sufficient(ciphertext.len())?;
             let cipher_ref: Vector<U8> = vm.alloc_vec(ciphertext.len()).map_err(MpcTlsError::vm)?;
             vm.mark_public(cipher_ref).map_err(MpcTlsError::vm)?;
 
@@ -166,7 +174,6 @@ impl AesGcmDecrypt {
         for DecryptRequest {
             ciphertext,
             typ,
-            visibility,
             version,
             explicit_nonce,
             ..
@@ -190,13 +197,11 @@ impl AesGcmDecrypt {
             let plaintext_ref: Vector<U8> =
                 vm.alloc_vec(ciphertext.len()).map_err(MpcTlsError::vm)?;
 
-            match visibility {
-                Visibility::Private => match self.role {
-                    TlsRole::Leader => vm.mark_private(plaintext_ref).map_err(MpcTlsError::vm)?,
-                    TlsRole::Follower => vm.mark_blind(plaintext_ref).map_err(MpcTlsError::vm)?,
-                },
-                Visibility::Public => vm.mark_public(plaintext_ref).map_err(MpcTlsError::vm)?,
+            match self.role {
+                TlsRole::Leader => vm.mark_private(plaintext_ref).map_err(MpcTlsError::vm)?,
+                TlsRole::Follower => vm.mark_blind(plaintext_ref).map_err(MpcTlsError::vm)?,
             }
+
             if let Some(plaintext) = plaintext {
                 vm.assign(plaintext_ref, plaintext.clone())
                     .map_err(MpcTlsError::vm)?;
@@ -254,7 +259,7 @@ impl AesGcmDecrypt {
             ..
         } in requests
         {
-            let j0 = self.keystream.j0(vm, explicit_nonce)?;
+            let j0 = self.keystream_mpc.j0(vm, explicit_nonce)?;
             let j0 = Decode::new(vm, self.role, transmute(j0))?;
             let j0 = j0.shared(vm)?;
 
@@ -279,6 +284,65 @@ impl AesGcmDecrypt {
             .await?;
 
         Ok(())
+    }
+
+    /// Re-encrypt plaintexts to ciphertexts.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - A virtual machine for 2PC.
+    /// * `ctx` - The context for IO.
+    /// * `messages` - The plaintext messages, if available.
+    /// * `plaintext_refs` - The plaintext references.
+    /// * `explicit_nonces` - The TLS explicit nonces.
+    #[instrument(level = "trace", skip_all, err)]
+    pub(crate) async fn prove<V, Ctx>(
+        &mut self,
+        vm: &mut V,
+        ctx: &mut Ctx,
+        messages: Option<Vec<PlainMessage>>,
+        plaintext_refs: Vec<Vector<U8>>,
+        explicit_nonces: Vec<[u8; 8]>,
+    ) -> Result<Vec<Vec<u8>>, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
+    {
+        let len = plaintext_refs.len();
+
+        let mut future = FuturesOrdered::new();
+        for k in 0..len {
+            let explicit_nonce = explicit_nonces[k];
+            let plaintext_ref = plaintext_refs[k];
+            let plaintext_len = plaintext_ref.len();
+
+            let keystream = self.keystream_zk.chunk_sufficient(plaintext_len)?;
+            let plaintext = match messages {
+                Some(ref plaintext) => Input::Message(plaintext[k].payload.0.clone()),
+                None => Input::Length(plaintext_len),
+            };
+
+            let cipher_out = keystream
+                .apply(vm, plaintext_ref)
+                .map_err(MpcTlsError::vm)?;
+            let cipher_ref = cipher_out
+                .assign(vm, explicit_nonce, START_COUNTER, plaintext)
+                .map_err(MpcTlsError::vm)?;
+
+            let ciphertext = vm.decode(cipher_ref).map_err(MpcTlsError::decode)?;
+            future.push_back(ciphertext);
+        }
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        let mut ciphertexts = Vec::with_capacity(len);
+
+        while let Some(ciphertext) = future.next().await {
+            ciphertexts.push(ciphertext?);
+        }
+
+        Ok(ciphertexts)
     }
 
     fn aes_ctr_local(

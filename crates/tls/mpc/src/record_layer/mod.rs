@@ -247,7 +247,8 @@ impl<Sc> Decrypter<Sc> {
 
     pub fn prepare(
         &mut self,
-        keystream: Keystream<Aes128>,
+        keystream_mpc: Keystream<Aes128>,
+        keystream_zk: Keystream<Aes128>,
         ghash_key: OneTimePadShared,
     ) -> Result<(), MpcTlsError> {
         let DecryptState::Init { ghash, .. } =
@@ -258,7 +259,8 @@ impl<Sc> Decrypter<Sc> {
 
         self.state = DecryptState::Prepared {
             ghash,
-            keystream,
+            keystream_mpc,
+            keystream_zk,
             ghash_key,
         };
         Ok(())
@@ -287,7 +289,8 @@ impl<Sc> Decrypter<Sc> {
     {
         let DecryptState::Prepared {
             mut ghash,
-            keystream,
+            keystream_mpc,
+            keystream_zk,
             ghash_key,
         } = std::mem::replace(&mut self.state, DecryptState::Error)
         else {
@@ -300,7 +303,7 @@ impl<Sc> Decrypter<Sc> {
         ghash.flush(ctx).await?;
         let ghash = ghash.finalize()?;
 
-        let aes = AesGcmDecrypt::new(self.role, keystream, ghash);
+        let aes = AesGcmDecrypt::new(self.role, keystream_mpc, keystream_zk, ghash);
         self.state = DecryptState::Ready(aes);
 
         Ok(())
@@ -338,7 +341,7 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
-    pub async fn decrypt<V, Ctx>(
+    pub async fn decrypt_public<V, Ctx>(
         &mut self,
         vm: &mut V,
         ctx: &mut Ctx,
@@ -362,16 +365,62 @@ impl<Sc> Decrypter<Sc> {
             typs.push(typ);
         }
 
+        let (messages, plaintext_refs) = aes.decrypt(vm, ctx, decrypts).await?;
+
+        for (&typ, plaintext_ref) in typs.iter().zip(plaintext_refs) {
+            self.transcript.record(typ, plaintext_ref);
+        }
+
+        Ok(messages)
+    }
+
+    pub async fn decrypt_private<V, Ctx>(
+        &mut self,
+        vm: &mut V,
+        ctx: &mut Ctx,
+        messages: Vec<DecryptRecord>,
+    ) -> Result<Option<Vec<PlainMessage>>, MpcTlsError>
+    where
+        V: Vm<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
+    {
+        let DecryptState::Ready(ref mut aes) = self.state else {
+            return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
+        };
+
+        let mut decrypts = Vec::with_capacity(messages.len());
+        let mut explicit_nonces = Vec::with_capacity(messages.len());
+        let mut purported_ciphertexts = Vec::with_capacity(messages.len());
+        let mut typs = Vec::with_capacity(messages.len());
+
+        for message in messages {
+            let (decrypt, typ) = Self::prepare_decrypt(&mut self.transcript, message)?;
+
+            explicit_nonces.push(decrypt.explicit_nonce);
+            purported_ciphertexts.push(decrypt.ciphertext.clone());
+            decrypts.push(decrypt);
+            typs.push(typ);
+        }
+
         let (messages, plaintext_refs) = if self.decrypt_local {
             aes.decrypt_local(vm, decrypts).await?
         } else {
             aes.decrypt(vm, ctx, decrypts).await?
         };
 
-        //TODO: Prove that plaintext encrypts to ciphertext
-
-        for (&typ, plaintext_ref) in typs.iter().zip(plaintext_refs) {
+        for (&typ, plaintext_ref) in typs.iter().zip(plaintext_refs.iter().copied()) {
             self.transcript.record(typ, plaintext_ref);
+        }
+
+        // TODO: Use zk vm here:
+        let ciphertexts = aes
+            .prove(vm, ctx, messages.clone(), plaintext_refs, explicit_nonces)
+            .await?;
+
+        if ciphertexts != purported_ciphertexts {
+            return Err(MpcTlsError::other(
+                "Ciphertexts do not re-encrypt back correctly",
+            ));
         }
 
         Ok(messages)
@@ -446,35 +495,6 @@ impl<Sc> Decrypter<Sc> {
         };
         Ok((decrypt, typ))
     }
-
-    /// Proves the plaintext of the message to the other party
-    ///
-    /// This verifies the tag of the message and locally decrypts it. Then, this
-    /// party commits to the plaintext and proves it encrypts back to the
-    /// ciphertext.
-    pub(crate) async fn prove_plaintext(
-        &mut self,
-        _msg: OpaqueMessage,
-    ) -> Result<PlainMessage, MpcTlsError> {
-        // TODO
-        // 1: Locally decrypt
-        // 2: Prove plaintext re-encrypts back to ciphertext
-        todo!()
-    }
-
-    /// Verifies the plaintext of the message
-    ///
-    /// This verifies the tag of the message then has the other party decrypt
-    /// it. Then, the other party commits to the plaintext and proves it
-    /// encrypts back to the ciphertext.
-    pub(crate) async fn verify_plaintext(
-        &mut self,
-        _msg: OpaqueMessage,
-    ) -> Result<(), MpcTlsError> {
-        // TODO
-        // 1: Verify plaintext re-encrypts back to ciphertext
-        todo!()
-    }
 }
 
 enum DecryptState<Sc> {
@@ -483,7 +503,8 @@ enum DecryptState<Sc> {
     },
     Prepared {
         ghash: Ghash<Sc>,
-        keystream: Keystream<Aes128>,
+        keystream_mpc: Keystream<Aes128>,
+        keystream_zk: Keystream<Aes128>,
         ghash_key: OneTimePadShared,
     },
     Ready(AesGcmDecrypt),

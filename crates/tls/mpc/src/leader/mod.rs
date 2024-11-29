@@ -168,9 +168,14 @@ where
         let traffic_size_mpc = self.config.common().rx_config().max_online_size();
         let traffic_size_zk = self.config.common().rx_config().max_offline_size();
 
-        let keystream_decrypt = self
+        let keystream_decrypt_mpc = self
             .cipher
-            .alloc(vm, traffic_size_mpc + traffic_size_zk)
+            .alloc(vm, traffic_size_mpc)
+            .map_err(MpcTlsError::cipher)?;
+
+        let keystream_decrypt_zk = self
+            .cipher
+            .alloc(vm, traffic_size_zk)
             .map_err(MpcTlsError::cipher)?;
 
         let zero_ref: Array<U8, 16> = vm.alloc().map_err(MpcTlsError::vm)?;
@@ -183,7 +188,8 @@ where
         let ghash_key = transmute(ghash_key);
         let ghash_key = Decode::new(vm, self.role, ghash_key)?.shared(vm)?;
 
-        self.decrypter.prepare(keystream_decrypt, ghash_key)?;
+        self.decrypter
+            .prepare(keystream_decrypt_mpc, keystream_decrypt_zk, ghash_key)?;
 
         // Set client random
         let client_random = self.state.try_as_ke()?.client_random.0;
@@ -336,7 +342,7 @@ where
             visibility: Visibility::Public,
         };
 
-        let msg = self.decrypter.decrypt(vm, ctx, vec![msg]).await?;
+        let msg = self.decrypter.decrypt_public(vm, ctx, vec![msg]).await?;
         let msg = msg
             .expect("Leader should recieve some message")
             .pop()
@@ -364,7 +370,7 @@ where
             visibility: Visibility::Public,
         };
 
-        let msg = self.decrypter.decrypt(vm, ctx, vec![msg]).await?;
+        let msg = self.decrypter.decrypt_public(vm, ctx, vec![msg]).await?;
         let msg = msg
             .expect("Leader should recieve some message")
             .pop()
@@ -393,7 +399,7 @@ where
             visibility: Visibility::Private,
         };
 
-        let msg = self.decrypter.decrypt(vm, ctx, vec![msg]).await?;
+        let msg = self.decrypter.decrypt_private(vm, ctx, vec![msg]).await?;
         let msg = msg
             .expect("Leader should recieve some message")
             .pop()

@@ -13,7 +13,7 @@ use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, S
 use std::{fmt::Debug, sync::Arc};
 
 mod config;
-pub(crate) use config::{GhashConfig, GhashConfigBuilder, GhashConfigBuilderError};
+pub(crate) use config::GhashConfig;
 
 #[derive(Debug)]
 enum State {
