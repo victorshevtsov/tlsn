@@ -30,7 +30,6 @@ pub use config::{
 pub use error::MpcTlsError;
 pub use follower::{FollowerCtrl, MpcTlsFollower, MpcTlsFollowerData};
 pub use leader::{LeaderCtrl, MpcTlsData, MpcTlsLeader};
-use tls_core::msgs::message::{OpaqueMessage, PlainMessage};
 use utils_aio::duplex::Duplex;
 
 /// A channel for sending and receiving messages between leader and follower
@@ -50,28 +49,4 @@ pub(crate) enum Direction {
     Sent,
     /// Data received from the TLS peer
     Recv,
-}
-
-/// Wrapper for TLS records that need to be encrypted.
-struct EncryptRecord {
-    info: EncryptInfo,
-    visibility: Visibility,
-}
-
-/// Either contains the message or the length of the message.
-enum EncryptInfo {
-    Message(PlainMessage),
-    Length(usize),
-}
-
-/// Wrapper for TLS records that need to be decrypted.
-struct DecryptRecord {
-    msg: OpaqueMessage,
-    visibility: Visibility,
-}
-
-/// Sets the visibility for en-/decryption operations.
-enum Visibility {
-    Private,
-    Public,
 }

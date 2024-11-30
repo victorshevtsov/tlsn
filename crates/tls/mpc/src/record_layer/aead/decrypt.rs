@@ -7,9 +7,9 @@ use crate::{
             ghash::{GhashCompute, Tag, TagBatch, TagComputer},
             transmute, START_COUNTER,
         },
-        DecryptRequest,
+        DecryptRequest, Visibility,
     },
-    MpcTlsError, TlsRole, Visibility,
+    MpcTlsError, TlsRole,
 };
 use cipher::{aes::Aes128, Input, Keystream};
 use futures::{stream::FuturesOrdered, StreamExt};
@@ -217,8 +217,8 @@ impl AesGcmDecrypt {
                 };
 
                 plaintexts.push(plaintext);
-                vm.commit(plaintext_ref).map_err(MpcTlsError::vm)?;
             }
+            vm.commit(plaintext_ref).map_err(MpcTlsError::vm)?;
             plaintext_refs.push(plaintext_ref);
         }
 

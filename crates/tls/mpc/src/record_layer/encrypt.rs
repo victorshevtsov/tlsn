@@ -1,8 +1,13 @@
+//! Record layer encryption.
+
 use crate::{
     decode::OneTimePadShared,
-    record_layer::aead::{encrypt::AesGcmEncrypt, ghash::Ghash},
+    record_layer::{
+        aead::{encrypt::AesGcmEncrypt, ghash::Ghash},
+        Visibility,
+    },
     transcript::Transcript,
-    EncryptInfo, EncryptRecord, MpcTlsError, TlsRole, Visibility,
+    MpcTlsError, TlsRole,
 };
 use cipher::{aes::Aes128, Keystream};
 use mpz_common::{Context, Flush};
@@ -17,10 +22,15 @@ use tls_core::{
     cipher::make_tls12_aad,
     msgs::{
         enums::{ContentType, ProtocolVersion},
-        message::OpaqueMessage,
+        message::{OpaqueMessage, PlainMessage},
     },
 };
 
+/// Handles encryption operations.
+///
+/// Deals with necessary setup and preparation in [`EncryptState`]. References to encryption input
+/// i.e. plaintext is written to [`Transcript`]. Prepares encryption for batched processing by
+/// building [`EncryptRequest`]s and delegating actual encryption to [`AesGcmEncrypt`].
 pub struct Encrypter<Sc> {
     role: TlsRole,
     transcript: Transcript,
@@ -28,6 +38,12 @@ pub struct Encrypter<Sc> {
 }
 
 impl<Sc> Encrypter<Sc> {
+    /// Creates a new instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `role` - The role, either leader or follower.
+    /// * `ghash` - The instance for computing ghash.
     pub(crate) fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
         Self {
             role,
@@ -36,6 +52,7 @@ impl<Sc> Encrypter<Sc> {
         }
     }
 
+    /// Allocates resources needed for encryption.
     pub(crate) fn alloc(&mut self) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128>,
@@ -50,6 +67,12 @@ impl<Sc> Encrypter<Sc> {
         Ok(())
     }
 
+    /// Injects further dependencies needed for encryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `keystream` - Provides keystream operations.
+    /// * `ghash_key` - The ghash key.
     pub(crate) fn prepare(
         &mut self,
         keystream: Keystream<Aes128>,
@@ -73,6 +96,11 @@ impl<Sc> Encrypter<Sc> {
         self.transcript.size()
     }
 
+    /// Finishes setup for encryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The context for IO.
     pub(crate) async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
@@ -101,6 +129,13 @@ impl<Sc> Encrypter<Sc> {
         Ok(())
     }
 
+    /// Encrypts a message.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The virtual machine.
+    /// * `ctx` - The context for IO.
+    /// * `message` - The message to encrypt.
     pub(crate) async fn encrypt<V, Ctx>(
         &mut self,
         vm: &mut V,
@@ -115,7 +150,13 @@ impl<Sc> Encrypter<Sc> {
             return Err(MpcTlsError::encrypt("Encrypter is not in Ready state"));
         };
 
-        let encrypt = Self::prepare_encrypt(self.role, vm, &mut self.transcript, message)?;
+        let seq = self.transcript.inc_seq();
+        let encrypt = Self::prepare_encrypt(self.role, vm, seq, message)?;
+
+        let typ = encrypt.typ;
+        let plaintext_ref = encrypt.plaintext_ref;
+
+        self.transcript.record(typ, plaintext_ref);
 
         let mut message = aes.encrypt(vm, ctx, vec![encrypt]).await?;
         let message = message
@@ -125,10 +166,18 @@ impl<Sc> Encrypter<Sc> {
         Ok(message)
     }
 
+    /// Prepares data for encryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `role` - The role, either leader or follower.
+    /// * `vm` - The virtual machine.
+    /// * `seq` - The TLS sequence number.
+    /// * `message` - The message to encrypt.
     fn prepare_encrypt<V>(
         role: TlsRole,
         vm: &mut V,
-        transcript: &mut Transcript,
+        seq: u64,
         message: EncryptRecord,
     ) -> Result<EncryptRequest, MpcTlsError>
     where
@@ -154,7 +203,6 @@ impl<Sc> Encrypter<Sc> {
             ),
         };
 
-        let seq = transcript.inc_seq();
         let explicit_nonce = seq.to_be_bytes();
         let aad = make_tls12_aad(seq, typ, version, len);
 
@@ -166,8 +214,6 @@ impl<Sc> Encrypter<Sc> {
             },
             Visibility::Public => vm.mark_public(plaintext_ref).map_err(MpcTlsError::vm)?,
         }
-
-        transcript.record(typ, plaintext_ref);
 
         let encrypt = EncryptRequest {
             plaintext,
@@ -181,6 +227,19 @@ impl<Sc> Encrypter<Sc> {
     }
 }
 
+/// Wrapper for TLS records that need to be encrypted.
+pub(crate) struct EncryptRecord {
+    pub(crate) info: EncryptInfo,
+    pub(crate) visibility: Visibility,
+}
+
+/// Either contains the message or the length of the message.
+pub(crate) enum EncryptInfo {
+    Message(PlainMessage),
+    Length(usize),
+}
+
+/// Contains data for encryption.
 pub(crate) struct EncryptRequest {
     pub(crate) plaintext: Option<Vec<u8>>,
     pub(crate) plaintext_ref: Vector<U8>,
@@ -190,6 +249,7 @@ pub(crate) struct EncryptRequest {
     pub(crate) aad: [u8; 13],
 }
 
+/// Inner state of [`Encrypter`].
 enum EncryptState<Sc> {
     Init {
         ghash: Ghash<Sc>,

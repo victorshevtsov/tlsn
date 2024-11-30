@@ -1,9 +1,11 @@
 use crate::{
     decode::Decode,
     msg::MpcTlsMessage,
-    record_layer::{aead::transmute, Decrypter, Encrypter},
-    DecryptRecord, Direction, EncryptInfo, EncryptRecord, MpcTlsChannel, MpcTlsError,
-    MpcTlsFollowerConfig, TlsRole, Visibility,
+    record_layer::{
+        Visibility,
+        {aead::transmute, DecryptRecord, Decrypter, EncryptInfo, EncryptRecord, Encrypter},
+    },
+    Direction, MpcTlsChannel, MpcTlsError, MpcTlsFollowerConfig, TlsRole,
 };
 use cipher::{aes::Aes128, Cipher};
 use futures::{

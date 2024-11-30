@@ -6,9 +6,11 @@ use crate::{
         DecryptMessage, DecryptServerFinished, EncryptAlert, EncryptClientFinished, EncryptMessage,
         MpcTlsMessage, ServerFinishedVd,
     },
-    record_layer::{aead::transmute, Decrypter, Encrypter},
-    DecryptRecord, Direction, EncryptInfo, EncryptRecord, MpcTlsChannel, MpcTlsLeaderConfig,
-    TlsRole, Visibility,
+    record_layer::{
+        Visibility,
+        {aead::transmute, DecryptRecord, Decrypter, EncryptInfo, EncryptRecord, Encrypter},
+    },
+    Direction, MpcTlsChannel, MpcTlsLeaderConfig, TlsRole,
 };
 use async_trait::async_trait;
 use cipher::{aes::Aes128, Cipher};

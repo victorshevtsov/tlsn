@@ -1,11 +1,16 @@
+//! Record layer decryption.
+
 use crate::{
     decode::OneTimePadShared,
-    record_layer::aead::{
-        decrypt::AesGcmDecrypt,
-        ghash::{Ghash, Tag},
+    record_layer::{
+        aead::{
+            decrypt::AesGcmDecrypt,
+            ghash::{Ghash, Tag},
+        },
+        Visibility,
     },
     transcript::Transcript,
-    DecryptRecord, MpcTlsError, TlsRole, Visibility,
+    MpcTlsError, TlsRole,
 };
 use cipher::{aes::Aes128, Keystream};
 use mpz_common::{Context, Flush};
@@ -21,6 +26,11 @@ use tls_core::{
     },
 };
 
+/// Handles decryption operations.
+///
+/// Deals with necessary setup and preparation in [`DecryptState`]. References to decryption input
+/// i.e. ciphertext is written to [`Transcript`]. Prepares decryption for batched processing by
+/// building [`DecryptRequest`]s and delegating actual decryption to [`AesGcmDecrypt`].
 pub struct Decrypter<Sc> {
     role: TlsRole,
     decrypt_local: bool,
@@ -29,6 +39,12 @@ pub struct Decrypter<Sc> {
 }
 
 impl<Sc> Decrypter<Sc> {
+    /// Creates a new instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `role` - The role, either leader or follower.
+    /// * `ghash` - The instance for computing ghash.
     pub(crate) fn new(role: TlsRole, ghash: Ghash<Sc>) -> Self {
         Self {
             role,
@@ -38,6 +54,7 @@ impl<Sc> Decrypter<Sc> {
         }
     }
 
+    /// Allocates resources needed for decryption.
     pub(crate) fn alloc(&mut self) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128>,
@@ -57,6 +74,13 @@ impl<Sc> Decrypter<Sc> {
         self.transcript.size()
     }
 
+    /// Injects further dependencies needed for decryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `keystream_mpc` - Provides keystream operations for MPC.
+    /// * `keystream_zk` - Provides keystream operations for ZK.
+    /// * `ghash_key` - The ghash key.
     pub(crate) fn prepare(
         &mut self,
         keystream_mpc: Keystream<Aes128>,
@@ -78,6 +102,12 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
+    /// Sets decryption key and iv.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key, if available.
+    /// * `iv` - The iv, if available.
     pub(crate) fn set_key_and_iv(
         &mut self,
         key: Option<Vec<u8>>,
@@ -92,6 +122,11 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
+    /// Finishes setup for decryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The context for IO.
     pub(crate) async fn start<Ctx>(&mut self, ctx: &mut Ctx) -> Result<(), MpcTlsError>
     where
         Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
@@ -121,6 +156,13 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
+    /// Verifies tags.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The virtual machine.
+    /// * `ctx` - The context for IO.
+    /// * `messages` - The messages to verify.
     pub(crate) async fn verify_tags<V, Ctx>(
         &mut self,
         vm: &mut V,
@@ -153,6 +195,13 @@ impl<Sc> Decrypter<Sc> {
         Ok(())
     }
 
+    /// Decrypts messages publicly.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The virtual machine.
+    /// * `ctx` - The context for IO.
+    /// * `messages` - The messages to decrypt.
     pub(crate) async fn decrypt_public<V, Ctx>(
         &mut self,
         vm: &mut V,
@@ -171,7 +220,8 @@ impl<Sc> Decrypter<Sc> {
         let mut typs = Vec::with_capacity(messages.len());
 
         for message in messages {
-            let (decrypt, typ) = Self::prepare_decrypt(&mut self.transcript, message)?;
+            let seq = self.transcript.inc_seq();
+            let (decrypt, typ) = Self::prepare_decrypt(seq, message)?;
 
             decrypts.push(decrypt);
             typs.push(typ);
@@ -186,6 +236,13 @@ impl<Sc> Decrypter<Sc> {
         Ok(messages)
     }
 
+    /// Decrypts messages privately for the leader.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The virtual machine.
+    /// * `ctx` - The context for IO.
+    /// * `messages` - The messages to decrypt.
     pub(crate) async fn decrypt_private<V, Ctx>(
         &mut self,
         vm: &mut V,
@@ -206,7 +263,8 @@ impl<Sc> Decrypter<Sc> {
         let mut typs = Vec::with_capacity(messages.len());
 
         for message in messages {
-            let (decrypt, typ) = Self::prepare_decrypt(&mut self.transcript, message)?;
+            let seq = self.transcript.inc_seq();
+            let (decrypt, typ) = Self::prepare_decrypt(seq, message)?;
 
             explicit_nonces.push(decrypt.explicit_nonce);
             purported_ciphertexts.push(decrypt.ciphertext.clone());
@@ -238,6 +296,12 @@ impl<Sc> Decrypter<Sc> {
         Ok(messages)
     }
 
+    /// Prepares data for tag verification.
+    ///
+    /// # Arguments
+    ///
+    /// * `seq` - TLS sequence number.
+    /// * `message` - The message for tag verification.
     fn prepare_tag_verify(seq: u64, message: DecryptRecord) -> Result<DecryptRequest, MpcTlsError> {
         let DecryptRecord { msg, visibility } = message;
 
@@ -272,8 +336,14 @@ impl<Sc> Decrypter<Sc> {
         Ok(decrypt)
     }
 
+    /// Prepares data for decryption.
+    ///
+    /// # Arguments
+    ///
+    /// * `seq` - TLS sequence number.
+    /// * `message` - The message to decrypt.
     fn prepare_decrypt(
-        transcript: &mut Transcript,
+        seq: u64,
         message: DecryptRecord,
     ) -> Result<(DecryptRequest, ContentType), MpcTlsError> {
         let DecryptRecord { msg, visibility } = message;
@@ -286,7 +356,6 @@ impl<Sc> Decrypter<Sc> {
 
         let mut ciphertext = payload.0;
 
-        let seq = transcript.inc_seq();
         let explicit_nonce: [u8; 8] = ciphertext
             .drain(..8)
             .collect::<Vec<u8>>()
@@ -309,6 +378,13 @@ impl<Sc> Decrypter<Sc> {
     }
 }
 
+/// Wrapper for TLS records that need to be decrypted.
+pub(crate) struct DecryptRecord {
+    pub(crate) msg: OpaqueMessage,
+    pub(crate) visibility: Visibility,
+}
+
+/// Contains data for decryption.
 pub(crate) struct DecryptRequest {
     pub(crate) ciphertext: Vec<u8>,
     pub(crate) typ: ContentType,
@@ -319,6 +395,7 @@ pub(crate) struct DecryptRequest {
     pub(crate) purported_tag: Tag,
 }
 
+/// Inner state of [`Decrypter`].
 enum DecryptState<Sc> {
     Init {
         ghash: Ghash<Sc>,
