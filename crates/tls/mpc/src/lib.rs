@@ -1,8 +1,8 @@
 //! This crate provides tooling for instantiating MPC TLS machinery for leader
 //! and follower.
 
-//! The main API objects are [MpcTlsLeader] and [MpcTlsFollower], which wrap the
-//! necessary cryptographic machinery and also an [MpcTlsChannel] for
+//! The main API objects are [`MpcTlsLeader`] and [`MpcTlsFollower`], which wrap the
+//! necessary cryptographic machinery and also an [`MpcTlsChannel`] for
 //! communication.
 
 #![deny(missing_docs, unreachable_pub, unused_must_use)]
@@ -14,7 +14,7 @@ mod config;
 mod error;
 pub(crate) mod follower;
 pub(crate) mod leader;
-pub mod msg;
+mod msg;
 
 mod decode;
 mod record_layer;
@@ -28,8 +28,7 @@ pub use config::{
     TranscriptConfig, TranscriptConfigBuilder, TranscriptConfigBuilderError,
 };
 pub use error::MpcTlsError;
-pub use follower::FollowerCtrl;
-pub use follower::{MpcTlsFollower, MpcTlsFollowerData};
+pub use follower::{FollowerCtrl, MpcTlsFollower, MpcTlsFollowerData};
 pub use leader::{LeaderCtrl, MpcTlsData, MpcTlsLeader};
 use tls_core::msgs::message::{OpaqueMessage, PlainMessage};
 use utils_aio::duplex::Duplex;

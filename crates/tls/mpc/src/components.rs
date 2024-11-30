@@ -1,3 +1,8 @@
+//! Helper code for dependency injection.
+//!
+//! Builds components needed by [`crate::leader::MpcTlsLeader`] and
+//! [`crate::follower::MpcTlsFollower`];
+
 use crate::{
     record_layer::{
         aead::ghash::{Ghash, GhashConfig},
@@ -15,6 +20,13 @@ use mpz_share_conversion::{ShareConversionReceiver, ShareConversionSender, Share
 use mpz_vm_core::Vm;
 
 /// Builds the components for MPC-TLS leader.
+///
+/// # Arguments
+///
+/// * `rs_p` - ROLE sender for P256 field elements.
+/// * `rr_p` - ROLE receiver for P256 field elements.
+/// * `rs_gf0` - ROLE sender for Gf2_128 field elements.
+/// * `rs_gf1` - ROLE sender for Gf2_128 field elements.
 pub fn build_leader<V, RSP, RRP, RSGF>(
     rs_p: RSP,
     rr_p: RRP,
@@ -64,6 +76,13 @@ where
 }
 
 /// Builds the components for MPC-TLS follower.
+///
+/// # Arguments
+///
+/// * `rs_p` - ROLE sender for P256 field elements.
+/// * `rr_p` - ROLE receiver for P256 field elements.
+/// * `rr_gf0` - ROLE receiver for Gf2_128 field elements.
+/// * `rr_gf1` - ROLE receiver for Gf2_128 field elements.
 pub fn build_follower<V, RSP, RRP, RRGF>(
     rs_p: RSP,
     rr_p: RRP,

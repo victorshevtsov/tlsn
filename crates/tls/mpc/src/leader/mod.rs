@@ -461,6 +461,7 @@ where
     }
 
     /// Defers decryption of any incoming messages.
+    #[instrument(level = "debug", skip_all, err)]
     pub async fn defer_decryption(&mut self) -> Result<(), MpcTlsError> {
         if self.committed {
             return Ok(());
@@ -472,6 +473,7 @@ where
         Ok(())
     }
 
+    #[instrument(level = "debug", skip_all, err)]
     async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;

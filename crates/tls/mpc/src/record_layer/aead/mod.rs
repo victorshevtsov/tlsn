@@ -6,10 +6,7 @@ use mpz_memory_core::{
 };
 
 pub(crate) mod decrypt;
-pub(crate) use decrypt::AesGcmDecrypt;
 pub(crate) mod encrypt;
-pub(crate) use encrypt::AesGcmEncrypt;
-
 pub(crate) mod ghash;
 
 const START_COUNTER: u32 = 2;

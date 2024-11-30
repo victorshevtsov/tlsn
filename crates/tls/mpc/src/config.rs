@@ -1,3 +1,5 @@
+//! Configs for transcript, leader and follower.
+
 use derive_builder::Builder;
 
 const DEFAULT_TRANSCRIPT_MAX_SIZE: usize = 1 << 14;
@@ -36,7 +38,7 @@ impl TranscriptConfig {
         builder
     }
 
-    /// Creates a new builder for `TranscriptConfig`.
+    /// Creates a new builder for [`TranscriptConfig`].
     pub fn builder() -> TranscriptConfigBuilder {
         TranscriptConfigBuilder::default()
     }
@@ -74,7 +76,7 @@ pub struct MpcTlsCommonConfig {
 }
 
 impl MpcTlsCommonConfig {
-    /// Creates a new builder for `MpcTlsCommonConfig`.
+    /// Creates a new builder for [`MpcTlsCommonConfig`].
     pub fn builder() -> MpcTlsCommonConfigBuilder {
         MpcTlsCommonConfigBuilder::default()
     }
@@ -121,7 +123,7 @@ pub struct MpcTlsLeaderConfig {
 }
 
 impl MpcTlsLeaderConfig {
-    /// Creates a new builder for `MpcTlsLeaderConfig`.
+    /// Creates a new builder for [`MpcTlsLeaderConfig`].
     pub fn builder() -> MpcTlsLeaderConfigBuilder {
         MpcTlsLeaderConfigBuilder::default()
     }
@@ -146,7 +148,7 @@ pub struct MpcTlsFollowerConfig {
 }
 
 impl MpcTlsFollowerConfig {
-    /// Creates a new builder for `MpcTlsFollowerConfig`.
+    /// Creates a new builder for [`MpcTlsFollowerConfig`].
     pub fn builder() -> MpcTlsFollowerConfigBuilder {
         MpcTlsFollowerConfigBuilder::default()
     }

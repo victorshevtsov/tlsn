@@ -1,3 +1,5 @@
+//! AES-GCM encryption.
+
 use crate::{
     decode::{Decode, OneTimePadShared},
     record_layer::{
@@ -110,7 +112,7 @@ impl AesGcmEncrypt {
     }
 }
 
-/// A struct for encryption operations.
+/// A struct for batch encryption operations.
 struct Encrypt {
     ghash: GhashCompute,
     j0s: Vec<OneTimePadShared>,

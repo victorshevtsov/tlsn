@@ -1,3 +1,5 @@
+//! AES-GCM decryption.
+
 use crate::{
     decode::{Decode, OneTimePadPrivate, OneTimePadShared},
     record_layer::{
@@ -79,6 +81,7 @@ impl AesGcmDecrypt {
     /// * `vm` - A virtual machine for 2PC.
     /// * `ctx` - The context for IO.
     /// * `requests` - Decryption requests.
+    #[allow(clippy::type_complexity)]
     #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn decrypt<V, Ctx>(
         &mut self,
@@ -152,6 +155,7 @@ impl AesGcmDecrypt {
     ///
     /// * `vm` - A virtual machine for 2PC.
     /// * `requests` - Decryption requests.
+    #[allow(clippy::type_complexity)]
     #[instrument(level = "trace", skip_all, err)]
     pub(crate) async fn decrypt_local<V, Ctx>(
         &mut self,
@@ -184,8 +188,8 @@ impl AesGcmDecrypt {
                     let key = self.key.as_ref().expect("Leader should have key");
                     let iv = self.iv.as_ref().expect("Leaders hould have iv");
                     let plaintext = Self::aes_ctr_local(
-                        &key,
-                        &iv,
+                        key,
+                        iv,
                         START_COUNTER as usize,
                         &explicit_nonce,
                         &ciphertext,
@@ -202,22 +206,17 @@ impl AesGcmDecrypt {
                 TlsRole::Follower => vm.mark_blind(plaintext_ref).map_err(MpcTlsError::vm)?,
             }
 
-            if let Some(plaintext) = plaintext {
+            if let (Some(ref mut plaintexts), Some(plaintext)) = (plaintexts.as_mut(), plaintext) {
                 vm.assign(plaintext_ref, plaintext.clone())
                     .map_err(MpcTlsError::vm)?;
 
-                match plaintexts.as_mut() {
-                    Some(plaintexts) => {
-                        let plaintext = PlainMessage {
-                            typ,
-                            version,
-                            payload: Payload(plaintext),
-                        };
+                let plaintext = PlainMessage {
+                    typ,
+                    version,
+                    payload: Payload(plaintext),
+                };
 
-                        plaintexts.push(plaintext);
-                    }
-                    None => (),
-                }
+                plaintexts.push(plaintext);
                 vm.commit(plaintext_ref).map_err(MpcTlsError::vm)?;
             }
             plaintext_refs.push(plaintext_ref);
@@ -413,6 +412,7 @@ impl Decrypt {
     }
 
     /// Adds a decrypt operation.
+    #[allow(clippy::too_many_arguments)]
     fn push(
         &mut self,
         j0: OneTimePadShared,

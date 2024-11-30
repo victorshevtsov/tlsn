@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{MpcTlsError, TlsRole};
 use mpz_circuits::{types::ValueType, Circuit, CircuitBuilder, Tracer};
 use mpz_core::bitvec::BitVec;
@@ -9,7 +7,12 @@ use mpz_memory_core::{
 };
 use mpz_vm_core::{CallBuilder, Vm, VmExt};
 use rand::{thread_rng, RngCore};
+use std::sync::Arc;
 
+/// Provides different decoding operations.
+///
+/// Supports decoding for the leader only by calling [`Decode::private`] or decoding additive
+/// shares for both parties by calling [`Decode::shared`].
 pub(crate) struct Decode {
     role: TlsRole,
     value: Vector<U8>,
@@ -19,6 +22,12 @@ pub(crate) struct Decode {
 }
 
 impl Decode {
+    /// Creates a new decoding instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `role` - The role, either leader or follower.
+    /// * `value` - The value to decode.
     pub(crate) fn new<V>(vm: &mut V, role: TlsRole, value: Vector<U8>) -> Result<Self, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
@@ -39,6 +48,11 @@ impl Decode {
 }
 
 impl Decode {
+    /// Creates a [`OneTimePadPrivate`], which supports decoding for the leader only.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The virtual machine.
     pub(crate) fn private<V>(self, vm: &mut V) -> Result<OneTimePadPrivate, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
@@ -80,6 +94,12 @@ impl Decode {
         Ok(otp)
     }
 
+    /// Creates a [`OneTimePadShared`], which supports decoding additive shares of the inner value
+    /// for leader and follower.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The virtual machine.
     pub(crate) fn shared<V>(self, vm: &mut V) -> Result<OneTimePadShared, MpcTlsError>
     where
         V: Vm<Binary> + View<Binary>,
@@ -90,9 +110,11 @@ impl Decode {
 
         let mut otp_0 = self.otp_0;
         let mut otp_1 = self.otp_1;
+
         if let TlsRole::Follower = self.role {
             std::mem::swap(&mut otp_0, &mut otp_1);
         }
+
         vm.mark_private(otp_0).map_err(MpcTlsError::vm)?;
         vm.mark_blind(otp_1).map_err(MpcTlsError::vm)?;
         vm.assign(otp_0, otp_value.clone())
@@ -122,6 +144,7 @@ impl Decode {
     }
 }
 
+/// Supports private decoding.
 pub(crate) struct OneTimePadPrivate {
     role: TlsRole,
     value: DecodeFutureTyped<BitVec, Vec<u8>>,
@@ -129,6 +152,7 @@ pub(crate) struct OneTimePadPrivate {
 }
 
 impl OneTimePadPrivate {
+    /// Decodes the inner value for the leader.
     pub(crate) async fn decode(self) -> Result<Option<Vec<u8>>, MpcTlsError> {
         let value = self.value.await.map_err(MpcTlsError::decode)?;
         match self.role {
@@ -146,6 +170,7 @@ impl OneTimePadPrivate {
     }
 }
 
+/// Supports decoding into additive shares.
 pub(crate) struct OneTimePadShared {
     role: TlsRole,
     value: DecodeFutureTyped<BitVec, Vec<u8>>,
@@ -153,6 +178,7 @@ pub(crate) struct OneTimePadShared {
 }
 
 impl OneTimePadShared {
+    /// Decodes the inner value as additive shares for leader and follower.
     pub(crate) async fn decode(self) -> Result<Vec<u8>, MpcTlsError> {
         let value = self.value.await.map_err(MpcTlsError::decode)?;
         match self.role {
@@ -186,7 +212,7 @@ pub(crate) fn build_otp(len: usize) -> Arc<Circuit> {
     Arc::new(circ)
 }
 
-/// Builds a circuit for applying one-time pads to secret share the provided values.
+/// Builds a circuit for applying one-time pads to secret-share the provided values.
 pub(crate) fn build_otp_shared(len: usize) -> Arc<Circuit> {
     let builder = CircuitBuilder::new();
 

@@ -79,6 +79,7 @@ where
     Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
 {
     /// Creates a new follower.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: MpcTlsFollowerConfig,
         channel: MpcTlsChannel,
@@ -577,6 +578,7 @@ where
         Ok(())
     }
 
+    #[instrument(level = "debug", skip_all, err)]
     async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
