@@ -19,7 +19,6 @@ pub mod msg;
 mod decode;
 mod record_layer;
 mod transcript;
-//mod dump;
 
 pub use components::{build_follower, build_leader};
 pub use config::{
