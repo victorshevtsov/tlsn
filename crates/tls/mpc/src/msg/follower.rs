@@ -59,7 +59,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for MpcT
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,

@@ -34,7 +34,7 @@ mpz-vm-core = { workspace = true }
 mpz-memory-core = { workspace = true }
 mpz-circuits = { workspace = true }
 
-uid-mux = { version = "0.1", features = ["serio"] }
+uid-mux = { workspace = true, features = ["serio"] }
 ludi = { git = "https://github.com/sinui0/ludi", rev = "e511c3b", default-features = false }
 serio = { workspace = true }
 
@@ -69,3 +69,4 @@ ghash_rc = { package = "ghash", version = "0.5" }
 rand_chacha = { workspace = true }
 rand = { workspace = true }
 generic-array = { workspace = true }
+uid-mux = { workspace = true, features = ["serio", "test-utils"] }
