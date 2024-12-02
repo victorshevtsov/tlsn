@@ -104,7 +104,7 @@ mod tests {
     use mpz_garble::protocol::semihonest::{Evaluator, Generator};
 
     use hmac_sha256_circuits::{hmac_sha256_partial, prf, session_keys};
-    use mpz_ot::ideal::cot::ideal_cot_with_delta;
+    use mpz_ot::ideal::cot::ideal_cot;
     use mpz_vm_core::{memory::correlated::Delta, prelude::*};
     use rand::{rngs::StdRng, SeedableRng};
 
@@ -140,7 +140,7 @@ mod tests {
         let (mut leader_ctx, mut follower_ctx) = test_st_executor(128);
 
         let delta = Delta::random(&mut rng);
-        let (ot_send, ot_recv) = ideal_cot_with_delta(delta.into_inner());
+        let (ot_send, ot_recv) = ideal_cot(delta.into_inner());
 
         let mut leader_vm = Generator::new(ot_send, [0u8; 16], delta);
         let mut follower_vm = Evaluator::new(ot_recv);
