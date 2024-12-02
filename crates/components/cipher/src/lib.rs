@@ -9,17 +9,15 @@
 
 pub mod aes;
 mod circuit;
-pub mod config;
 
 pub use circuit::CipherCircuit;
-pub use config::CipherConfig;
 
 use async_trait::async_trait;
 use circuit::build_xor_circuit;
 use mpz_circuits::types::ValueType;
 use mpz_memory_core::{
     binary::{Binary, U8},
-    FromRaw, Repr, Slice, StaticSize, ToRaw, Vector,
+    FromRaw, MemoryExt, Repr, Slice, StaticSize, ToRaw, Vector,
 };
 use mpz_vm_core::{CallBuilder, CallError, Vm, VmExt};
 use std::collections::VecDeque;
@@ -39,6 +37,12 @@ pub trait Cipher<C: CipherCircuit, V: Vm<Binary>> {
 
     /// Sets the initialization vector.
     fn set_iv(&mut self, iv: <C as CipherCircuit>::Iv);
+
+    /// Returns the key reference.
+    fn key(&self) -> Result<<C as CipherCircuit>::Key, Self::Error>;
+
+    /// Returns the iv reference.
+    fn iv(&self) -> Result<<C as CipherCircuit>::Iv, Self::Error>;
 
     /// Computes the [`Keystream`].
     ///
@@ -114,6 +118,61 @@ impl<C: CipherCircuit> Keystream<C> {
         Ok(cipher_output)
     }
 
+    /// Computes a j0 block.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The necessary virtual machine.
+    /// * `explicit_nonce` - The TLS explicit nonce.
+    pub fn j0<V>(
+        &mut self,
+        vm: &mut V,
+        explicit_nonce: <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear,
+    ) -> Result<<C as CipherCircuit>::Block, CipherError>
+    where
+        V: Vm<Binary>,
+        <<C as CipherCircuit>::Counter as Repr<Binary>>::Clear: From<[u8; 4]>,
+    {
+        if self.block_len() == 0 {
+            return Err(CipherError::new("keystream is empty"));
+        }
+
+        let nonce = self
+            .explicit_nonces
+            .pop_front()
+            .expect("Keystream block should be present");
+
+        let ctr = self
+            .counters
+            .pop_front()
+            .expect("Keystream block should be present");
+
+        vm.assign(nonce, explicit_nonce).map_err(CipherError::new)?;
+        vm.commit(nonce).map_err(CipherError::new)?;
+
+        vm.assign(ctr, 1_u32.to_be_bytes().into())
+            .map_err(CipherError::new)?;
+        vm.commit(ctr).map_err(CipherError::new)?;
+
+        let output = self
+            .outputs
+            .pop_front()
+            .expect("Keystream block should be present");
+
+        Ok(output)
+    }
+
+    /// Cuts off sufficient blocks of the keystream for a specified byte length.
+    ///
+    /// # Arguments
+    ///
+    /// * `byte_count` - The minimum number of bytes required.
+    pub fn chunk_sufficient(&mut self, byte_count: usize) -> Result<Keystream<C>, CipherError> {
+        let block_size = <<C as CipherCircuit>::Block as StaticSize<Binary>>::SIZE / 8;
+        let block_count = byte_count / block_size + (byte_count % block_size != 0) as usize;
+        self.chunk(block_count)
+    }
+
     /// Cuts off blocks of the keystream.
     ///
     /// # Arguments
@@ -156,11 +215,77 @@ pub struct CipherOutput<C: CipherCircuit> {
 }
 
 impl<C: CipherCircuit> CipherOutput<C> {
+    /// Assigns values to the input references and returns the output reference.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The necessary virtual machine.
+    /// * `explicit_nonce` - The TLS explicit nonce.
+    /// * `start_ctr` - The TLS counter number to start with.
+    /// * `message` - The message to en-/decrypt.
+    pub fn assign<V>(
+        self,
+        vm: &mut V,
+        explicit_nonce: <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear,
+        start_ctr: u32,
+        message: Input,
+    ) -> Result<Vector<U8>, CipherError>
+    where
+        V: Vm<Binary>,
+        <<C as CipherCircuit>::Counter as Repr<Binary>>::Clear: From<[u8; 4]>,
+        <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear: Copy,
+    {
+        let (len, message) = match message {
+            Input::Message(msg) => (msg.len(), Some(msg)),
+            Input::Length(len) => (len, None),
+        };
+
+        if self.len() != len {
+            return Err(CipherError::new(format!(
+                "message has wrong length, got {}, but expected {}",
+                len,
+                self.len()
+            )));
+        }
+
+        let message_len = len as u32;
+        let block_count = (message_len / 16) + (message_len % 16 != 0) as u32;
+        let counters = (start_ctr..start_ctr + block_count).map(|counter| counter.to_be_bytes());
+
+        for ((ctr, ctr_value), nonce) in self
+            .counters
+            .into_iter()
+            .zip(counters)
+            .zip(self.explicit_nonces)
+        {
+            vm.assign(ctr, ctr_value.into()).map_err(CipherError::new)?;
+            vm.commit(ctr).map_err(CipherError::new)?;
+
+            vm.assign(nonce, explicit_nonce).map_err(CipherError::new)?;
+            vm.commit(nonce).map_err(CipherError::new)?;
+        }
+
+        if let Some(msg) = message {
+            vm.assign(self.input, msg).map_err(CipherError::new)?;
+        }
+        vm.commit(self.input).map_err(CipherError::new)?;
+
+        Ok(self.output)
+    }
+
     /// Returns the stream length in bytes.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.input.len()
     }
+}
+
+/// The input for the cipher.
+pub enum Input {
+    /// The actual message if available.
+    Message(Vec<u8>),
+    /// The length of the message.
+    Length(usize),
 }
 
 /// A cipher error.

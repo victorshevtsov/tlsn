@@ -1,8 +1,8 @@
 //! This crate provides tooling for instantiating MPC TLS machinery for leader
 //! and follower.
 
-//! The main API objects are [MpcTlsLeader] and [MpcTlsFollower], which wrap the
-//! necessary cryptographic machinery and also an [MpcTlsChannel] for
+//! The main API objects are [`MpcTlsLeader`] and [`MpcTlsFollower`], which wrap the
+//! necessary cryptographic machinery and also an [`MpcTlsChannel`] for
 //! communication.
 
 #![deny(missing_docs, unreachable_pub, unused_must_use)]
@@ -11,18 +11,16 @@
 
 mod components;
 mod config;
-pub(crate) mod error;
+mod error;
 pub(crate) mod follower;
 pub(crate) mod leader;
-pub mod msg;
-pub(crate) mod record_layer;
+mod msg;
 
-// These need to be integrated/reused
-mod mac_prep;
-mod other;
-mod tag;
+mod decode;
+mod record_layer;
+mod transcript;
 
-pub use components::build_components;
+pub use components::{build_follower, build_leader};
 pub use config::{
     MpcTlsCommonConfig, MpcTlsCommonConfigBuilder, MpcTlsCommonConfigBuilderError,
     MpcTlsFollowerConfig, MpcTlsFollowerConfigBuilder, MpcTlsFollowerConfigBuilderError,

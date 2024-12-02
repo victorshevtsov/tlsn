@@ -112,6 +112,13 @@ impl GhashCore<Finalized> {
     }
 }
 
+impl<T: State> GhashCore<T> {
+    /// Returns the maximum number of blocks that can be computed.
+    pub(crate) fn max_block_count(&self) -> usize {
+        self.max_block_count
+    }
+}
+
 #[cfg(test)]
 impl<T: State> GhashCore<T> {
     pub(crate) fn state(&self) -> &T {

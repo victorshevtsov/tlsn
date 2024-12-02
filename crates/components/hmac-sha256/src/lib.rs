@@ -26,7 +26,7 @@ pub async fn build_circuits() {
 }
 
 /// PRF output.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PrfOutput {
     /// TLS session keys.
     pub keys: SessionKeys,
@@ -37,7 +37,7 @@ pub struct PrfOutput {
 }
 
 /// Session keys computed by the PRF.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SessionKeys {
     /// Client write key.
     pub client_write_key: Array<U8, 16>,

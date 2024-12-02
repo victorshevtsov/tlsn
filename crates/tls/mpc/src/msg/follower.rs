@@ -1,10 +1,6 @@
 //! Messages for the follower actor.
 
-use ::ludi::{Context, Message};
-use ludi::Dispatch;
-
 use crate::{
-    error::Kind,
     msg::{
         ClientFinishedVd, CloseConnection, Commit, CommitMessage, ComputeKeyExchange, DecryptAlert,
         DecryptMessage, DecryptServerFinished, EncryptAlert, EncryptClientFinished, EncryptMessage,
@@ -12,6 +8,15 @@ use crate::{
     },
     MpcTlsError, MpcTlsFollower,
 };
+use cipher::{aes::Aes128, Cipher};
+use hmac_sha256::Prf;
+use key_exchange::KeyExchange;
+use ludi::{Context as LudiContext, Dispatch, Message};
+use mpz_common::{Context, Flush};
+use mpz_fields::gf2_128::Gf2_128;
+use mpz_memory_core::{binary::Binary, Memory, View};
+use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
+use mpz_vm_core::{Execute, Vm};
 
 #[allow(missing_docs)]
 #[derive(Debug)]
@@ -50,11 +55,22 @@ pub enum MpcTlsFollowerMsgReturn {
     Finalize(<Commit as Message>::Return),
 }
 
-impl Dispatch<MpcTlsFollower> for MpcTlsFollowerMsg {
+impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for MpcTlsFollowerMsg
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     async fn dispatch<R: FnOnce(Self::Return) + Send>(
         self,
-        actor: &mut MpcTlsFollower,
-        ctx: &mut Context<MpcTlsFollower>,
+        actor: &mut MpcTlsFollower<K, P, C, Sc, Ctx, V>,
+        ctx: &mut LudiContext<MpcTlsFollower<K, P, C, Sc, Ctx, V>>,
         ret: R,
     ) {
         match self {
@@ -140,10 +156,10 @@ impl TryFrom<MpcTlsMessage> for MpcTlsFollowerMsg {
             MpcTlsMessage::DecryptMessage(msg) => Ok(Self::DecryptMessage(msg)),
             MpcTlsMessage::CloseConnection(msg) => Ok(Self::CloseConnection(msg)),
             MpcTlsMessage::Commit(msg) => Ok(Self::Finalize(msg)),
-            msg => Err(MpcTlsError::new(
-                Kind::PeerMisbehaved,
-                format!("peer sent unexpected message: {:?}", msg),
-            )),
+            msg => Err(MpcTlsError::peer(format!(
+                "peer sent unexpected message: {:?}",
+                msg
+            ))),
         }
     }
 }

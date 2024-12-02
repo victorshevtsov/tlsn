@@ -1,17 +1,28 @@
 use crate::{
-    error::Kind,
+    decode::Decode,
     msg::MpcTlsMessage,
-    record_layer::{Decrypter, Encrypter},
-    Direction, MpcTlsChannel, MpcTlsError, MpcTlsFollowerConfig,
+    record_layer::{
+        Visibility,
+        {aead::transmute, DecryptRecord, Decrypter, EncryptInfo, EncryptRecord, Encrypter},
+    },
+    Direction, MpcTlsChannel, MpcTlsError, MpcTlsFollowerConfig, TlsRole,
 };
-use aead::{aes_gcm::AesGcmError, Aead};
+use cipher::{aes::Aes128, Cipher};
 use futures::{
     stream::{SplitSink, SplitStream},
     StreamExt,
 };
-use hmac_sha256::Prf;
+use hmac_sha256::{Prf, PrfOutput};
 use ke::KeyExchange;
 use key_exchange as ke;
+use mpz_common::{Context, Flush};
+use mpz_fields::gf2_128::Gf2_128;
+use mpz_memory_core::{
+    binary::{Binary, U8},
+    Array, Memory, MemoryExt, View, ViewExt,
+};
+use mpz_share_conversion::{AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConvert};
+use mpz_vm_core::{Execute, Vm};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use std::{collections::VecDeque, mem};
 use tls_core::{
@@ -34,17 +45,22 @@ use actor::MpcTlsFollowerCtrl;
 pub type FollowerCtrl = MpcTlsFollowerCtrl;
 
 /// MPC-TLS follower.
-pub struct MpcTlsFollower {
+pub struct MpcTlsFollower<K, P, C, Sc, Ctx, V> {
     state: State,
     config: MpcTlsFollowerConfig,
+    role: TlsRole,
 
     _sink: SplitSink<MpcTlsChannel, MpcTlsMessage>,
     stream: Option<SplitStream<MpcTlsChannel>>,
 
-    ke: Box<dyn KeyExchange + Send>,
-    prf: Box<dyn Prf + Send>,
-    encrypter: Encrypter,
-    decrypter: Decrypter,
+    ke: K,
+    prf: P,
+    cipher: C,
+    encrypter: Encrypter<Sc>,
+    decrypter: Decrypter<Sc>,
+    ctx: Ctx,
+    vm: V,
+    prf_output: Option<PrfOutput>,
 
     /// Whether the server has sent a CloseNotify alert.
     close_notify: bool,
@@ -52,38 +68,47 @@ pub struct MpcTlsFollower {
     committed: bool,
 }
 
-impl MpcTlsFollower {
+impl<K, P, C, Sc, Ctx, V> MpcTlsFollower<K, P, C, Sc, Ctx, V>
+where
+    Self: Send,
+    K: KeyExchange<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send + Flush<Ctx>,
+    C: Cipher<Aes128, V> + Send,
+    Ctx: Context + Send,
+    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    Sc: ShareConvert<Gf2_128> + Flush<Ctx> + Send,
+    Sc: AdditiveToMultiplicative<Gf2_128, Future: Send>,
+    Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
+{
     /// Creates a new follower.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: MpcTlsFollowerConfig,
         channel: MpcTlsChannel,
-        ke: Box<dyn KeyExchange + Send>,
-        prf: Box<dyn Prf + Send>,
-        encrypter: Box<dyn Aead<Error = AesGcmError> + Send>,
-        decrypter: Box<dyn Aead<Error = AesGcmError> + Send>,
+        ke: K,
+        prf: P,
+        cipher: C,
+        encrypter: Encrypter<Sc>,
+        decrypter: Decrypter<Sc>,
+        ctx: Ctx,
+        vm: V,
     ) -> Self {
-        let encrypter = Encrypter::new(
-            encrypter,
-            config.common().tx_config().id().to_string(),
-            config.common().tx_config().opaque_id().to_string(),
-        );
-        let decrypter = Decrypter::new(
-            decrypter,
-            config.common().rx_config().id().to_string(),
-            config.common().rx_config().opaque_id().to_string(),
-        );
-
         let (_sink, stream) = channel.split();
 
         Self {
             state: State::Init,
             config,
+            role: TlsRole::Follower,
             _sink,
             stream: Some(stream),
             ke,
             prf,
+            cipher,
             encrypter,
             decrypter,
+            ctx,
+            vm,
+            prf_output: None,
             close_notify: false,
             committed: false,
         }
@@ -92,29 +117,87 @@ impl MpcTlsFollower {
     /// Performs any one-time setup operations.
     #[instrument(level = "trace", skip_all, err)]
     pub async fn setup(&mut self) -> Result<(), MpcTlsError> {
-        let pms = self.ke.setup().await?;
-        let session_keys = self.prf.setup(pms.into_value()).await?;
-        futures::try_join!(self.encrypter.setup(), self.decrypter.setup())?;
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
 
-        futures::try_join!(
-            self.encrypter
-                .set_key(session_keys.client_write_key, session_keys.client_iv),
-            self.decrypter
-                .set_key(session_keys.server_write_key, session_keys.server_iv)
-        )?;
+        // Allocate
+        self.ke.alloc()?;
+        self.encrypter.alloc()?;
+        self.decrypter.alloc()?;
 
-        self.ke.preprocess().await?;
-        self.prf.preprocess().await?;
+        // Setup
+        let pms = self.ke.setup(vm)?.into_value();
+        let prf_out = self.prf.setup(vm, pms)?;
+        self.prf_output = Some(prf_out);
 
-        let preprocess_encrypt = self.config.common().tx_config().max_online_size();
-        let preprocess_decrypt = self.config.common().rx_config().max_online_size();
+        // Set up encryption
+        self.cipher.set_key(prf_out.keys.client_write_key);
+        self.cipher.set_iv(prf_out.keys.client_iv);
 
-        futures::try_join!(
-            self.encrypter.preprocess(preprocess_encrypt),
-            self.decrypter.preprocess(preprocess_decrypt),
-        )?;
+        let traffic_size = self.config.common().tx_config().max_online_size();
+        let keystream_encrypt = self
+            .cipher
+            .alloc(vm, traffic_size)
+            .map_err(MpcTlsError::cipher)?;
 
-        self.prf.set_client_random(None).await?;
+        let zero_ref: Array<U8, 16> = vm.alloc().map_err(MpcTlsError::vm)?;
+        vm.mark_public(zero_ref).map_err(MpcTlsError::vm)?;
+
+        let ghash_key = self
+            .cipher
+            .assign_block(vm, zero_ref, [0_u8; 16])
+            .map_err(MpcTlsError::cipher)?;
+        let ghash_key = transmute(ghash_key);
+        let ghash_key = Decode::new(vm, self.role, ghash_key)?.shared(vm)?;
+
+        self.encrypter.prepare(keystream_encrypt, ghash_key)?;
+
+        // Set up decryption
+        self.cipher.set_key(prf_out.keys.server_write_key);
+        self.cipher.set_iv(prf_out.keys.server_iv);
+
+        let traffic_size_mpc = self.config.common().rx_config().max_online_size();
+        let traffic_size_zk = self.config.common().rx_config().max_offline_size();
+
+        let keystream_decrypt_mpc = self
+            .cipher
+            .alloc(vm, traffic_size_mpc)
+            .map_err(MpcTlsError::cipher)?;
+
+        let keystream_decrypt_zk = self
+            .cipher
+            .alloc(vm, traffic_size_zk)
+            .map_err(MpcTlsError::cipher)?;
+
+        let zero_ref: Array<U8, 16> = vm.alloc().map_err(MpcTlsError::vm)?;
+        vm.mark_public(zero_ref).map_err(MpcTlsError::vm)?;
+
+        let ghash_key = self
+            .cipher
+            .assign_block(vm, zero_ref, [0_u8; 16])
+            .map_err(MpcTlsError::cipher)?;
+        let ghash_key = transmute(ghash_key);
+        let ghash_key = Decode::new(vm, self.role, ghash_key)?.shared(vm)?;
+
+        self.decrypter
+            .prepare(keystream_decrypt_mpc, keystream_decrypt_zk, ghash_key)?;
+
+        // Set client random
+        self.prf.set_client_random(vm, None)?;
+
+        // Flush and preprocess
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        self.prf
+            .flush(ctx)
+            .await
+            .map_err(MpcTlsError::key_exchange)?;
+        self.ke
+            .flush(ctx)
+            .await
+            .map_err(MpcTlsError::key_exchange)?;
 
         Ok(())
     }
@@ -125,13 +208,10 @@ impl MpcTlsFollower {
                 let new_len = self.encrypter.sent_bytes() + len;
                 let max_size = self.config.common().tx_config().max_online_size();
                 if new_len > max_size {
-                    return Err(MpcTlsError::new(
-                        Kind::Config,
-                        format!(
-                            "max sent transcript size exceeded: {} > {}",
-                            new_len, max_size
-                        ),
-                    ));
+                    return Err(MpcTlsError::config(format!(
+                        "max sent transcript size exceeded: {} > {}",
+                        new_len, max_size
+                    )));
                 }
             }
             Direction::Recv => {
@@ -139,13 +219,10 @@ impl MpcTlsFollower {
                 let max_size = self.config.common().rx_config().max_online_size()
                     + self.config.common().rx_config().max_offline_size();
                 if new_len > max_size {
-                    return Err(MpcTlsError::new(
-                        Kind::Config,
-                        format!(
-                            "max received transcript size exceeded: {} > {}",
-                            new_len, max_size
-                        ),
-                    ));
+                    return Err(MpcTlsError::config(format!(
+                        "max received transcript size exceeded: {} > {}",
+                        new_len, max_size
+                    )));
                 }
             }
         }
@@ -159,15 +236,13 @@ impl MpcTlsFollower {
     /// the leader has committed to the transcript.
     fn is_accepting_messages(&self) -> Result<(), MpcTlsError> {
         if self.close_notify {
-            return Err(MpcTlsError::new(
-                Kind::PeerMisbehaved,
+            return Err(MpcTlsError::peer(
                 "attempted to commit a message after receiving CloseNotify",
             ));
         }
 
         if self.committed {
-            return Err(MpcTlsError::new(
-                Kind::PeerMisbehaved,
+            return Err(MpcTlsError::peer(
                 "attempted to commit a new message after committing transcript",
             ));
         }
@@ -180,7 +255,7 @@ impl MpcTlsFollower {
         self.state.take().try_into_init()?;
 
         // Key exchange
-        self.ke.compute_pms().await?;
+        let eq = self.ke.compute_pms(&mut self.vm)?;
 
         let server_key = self
             .ke
@@ -188,9 +263,24 @@ impl MpcTlsFollower {
             .expect("server key should be set after computing pms");
 
         // PRF
-        self.prf.set_server_random(server_random).await?;
+        let ctx = &mut self.ctx;
+        let vm = &mut self.vm;
+        self.prf.set_server_random(vm, server_random)?;
+        self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
-        futures::try_join!(self.encrypter.start(), self.decrypter.start())?;
+        eq.check().await.map_err(MpcTlsError::key_exchange)?;
+
+        // Encryption and decryption preparation.
+        self.encrypter
+            .start(ctx)
+            .await
+            .map_err(MpcTlsError::encrypt)?;
+        self.decrypter
+            .start(ctx)
+            .await
+            .map_err(MpcTlsError::decrypt)?;
 
         self.state = State::Ke(Ke {
             server_key: PublicKey::new(
@@ -206,7 +296,16 @@ impl MpcTlsFollower {
     async fn client_finished_vd(&mut self, handshake_hash: [u8; 32]) -> Result<(), MpcTlsError> {
         let Ke { server_key } = self.state.take().try_into_ke()?;
 
-        let client_finished = self.prf.set_cf_hash(handshake_hash).await?;
+        self.prf.set_cf_hash(&mut self.vm, handshake_hash)?;
+        let prf_output = self.prf_output.expect("Prf output should be some");
+        let client_finished = prf_output.cf_vd;
+        let client_finished = self.vm.decode(client_finished).map_err(MpcTlsError::vm)?;
+
+        let ctx = &mut self.ctx;
+        self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        let client_finished = client_finished.await?;
 
         self.state = State::Cf(Cf {
             server_key,
@@ -223,17 +322,26 @@ impl MpcTlsFollower {
             server_finished,
         } = self.state.take().try_into_sf()?;
 
-        let expected_server_finished = self.prf.set_sf_hash(handshake_hash).await?;
+        self.prf.set_sf_hash(&mut self.vm, handshake_hash)?;
+        let prf_output = self.prf_output.expect("Prf output should be some");
+        let expected_server_finished = prf_output.sf_vd;
+        let expected_server_finished = self
+            .vm
+            .decode(expected_server_finished)
+            .map_err(MpcTlsError::vm)?;
+
+        let ctx = &mut self.ctx;
+        self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        let expected_server_finished = expected_server_finished.await?;
 
         let Some(server_finished) = server_finished else {
-            return Err(MpcTlsError::new(Kind::State, "server finished is not set"));
+            return Err(MpcTlsError::prf("server finished is not set"));
         };
 
         if server_finished != expected_server_finished {
-            return Err(MpcTlsError::new(
-                Kind::Prf,
-                "server finished does not match",
-            ));
+            return Err(MpcTlsError::prf("server finished does not match"));
         }
 
         self.state = State::Active(Active {
@@ -258,12 +366,17 @@ impl MpcTlsFollower {
         let mut payload = Vec::new();
         msg.encode(&mut payload);
 
-        self.encrypter
-            .encrypt_public(PlainMessage {
+        let encrypt = EncryptRecord {
+            info: EncryptInfo::Message(PlainMessage {
                 typ: ContentType::Handshake,
                 version: ProtocolVersion::TLSv1_2,
                 payload: Payload(payload),
-            })
+            }),
+            visibility: Visibility::Public,
+        };
+
+        self.encrypter
+            .encrypt(&mut self.vm, &mut self.ctx, encrypt)
             .await?;
 
         self.state = State::Sf(Sf {
@@ -280,24 +393,25 @@ impl MpcTlsFollower {
         if let Some(alert) = AlertMessagePayload::read_bytes(&msg) {
             // We only allow the leader to send a CloseNotify alert
             if alert.description != AlertDescription::CloseNotify {
-                return Err(MpcTlsError::new(
-                    Kind::PeerMisbehaved,
+                return Err(MpcTlsError::peer(
                     "attempted to send an alert other than CloseNotify",
                 ));
             }
         } else {
-            return Err(MpcTlsError::new(
-                Kind::PeerMisbehaved,
-                "invalid alert message",
-            ));
+            return Err(MpcTlsError::peer("invalid alert message"));
         }
 
-        self.encrypter
-            .encrypt_public(PlainMessage {
+        let encrypt = EncryptRecord {
+            info: EncryptInfo::Message(PlainMessage {
                 typ: ContentType::Alert,
                 version: ProtocolVersion::TLSv1_2,
                 payload: Payload::new(msg),
-            })
+            }),
+            visibility: Visibility::Public,
+        };
+
+        self.encrypter
+            .encrypt(&mut self.vm, &mut self.ctx, encrypt)
             .await?;
 
         Ok(())
@@ -309,8 +423,13 @@ impl MpcTlsFollower {
         self.check_transcript_length(Direction::Sent, len)?;
         self.state.try_as_active()?;
 
+        let encrypt = EncryptRecord {
+            info: EncryptInfo::Length(len),
+            visibility: Visibility::Private,
+        };
+
         self.encrypter
-            .encrypt_blind(ContentType::ApplicationData, ProtocolVersion::TLSv1_2, len)
+            .encrypt(&mut self.vm, &mut self.ctx, encrypt)
             .await?;
 
         Ok(())
@@ -337,19 +456,28 @@ impl MpcTlsFollower {
             server_finished, ..
         } = self.state.try_as_sf_mut()?;
 
-        let msg = self
-            .decrypter
-            .decrypt_public(OpaqueMessage {
+        let decrypt = DecryptRecord {
+            msg: OpaqueMessage {
                 typ: ContentType::Handshake,
                 version: ProtocolVersion::TLSv1_2,
                 payload: Payload::new(msg),
-            })
+            },
+            visibility: Visibility::Public,
+        };
+
+        let msg = self
+            .decrypter
+            .decrypt_public(&mut self.vm, &mut self.ctx, vec![decrypt])
             .await?;
+
+        let msg = msg
+            .expect("Follower should get some public message decrypted")
+            .pop()
+            .expect("Should be some message available");
 
         let msg = msg.payload.0;
         if msg.len() != 16 {
-            return Err(MpcTlsError::new(
-                Kind::Decrypt,
+            return Err(MpcTlsError::decrypt(
                 "server finished message is not 16 bytes",
             ));
         }
@@ -365,24 +493,30 @@ impl MpcTlsFollower {
     async fn decrypt_alert(&mut self, msg: Vec<u8>) -> Result<(), MpcTlsError> {
         self.state.try_as_active()?;
 
-        let alert = self
-            .decrypter
-            .decrypt_public(OpaqueMessage {
+        let decrypt = DecryptRecord {
+            msg: OpaqueMessage {
                 typ: ContentType::Alert,
                 version: ProtocolVersion::TLSv1_2,
                 payload: Payload::new(msg),
-            })
+            },
+            visibility: Visibility::Public,
+        };
+        let msg = self
+            .decrypter
+            .decrypt_public(&mut self.vm, &mut self.ctx, vec![decrypt])
             .await?;
+
+        let alert = msg
+            .expect("Follower should get some public message decrypted")
+            .pop()
+            .expect("Should be some message available");
 
         let Some(alert) = AlertMessagePayload::read_bytes(&alert.payload.0) else {
             return Err(MpcTlsError::other("server sent an invalid alert"));
         };
 
         if alert.description != AlertDescription::CloseNotify {
-            return Err(MpcTlsError::new(
-                Kind::PeerMisbehaved,
-                "server sent a fatal alert",
-            ));
+            return Err(MpcTlsError::peer("server sent a fatal alert"));
         }
 
         self.close_notify = true;
@@ -394,22 +528,19 @@ impl MpcTlsFollower {
     async fn decrypt_message(&mut self) -> Result<(), MpcTlsError> {
         let Active { buffer, .. } = self.state.try_as_active_mut()?;
 
-        let msg = buffer.pop_front().ok_or(MpcTlsError::new(
-            Kind::PeerMisbehaved,
+        let msg = buffer.pop_front().ok_or(MpcTlsError::peer(
             "attempted to decrypt message when no messages are committed",
         ))?;
 
         debug!("decrypting message");
 
-        if self.committed {
-            // At this point the AEAD key was revealed to the leader and the leader locally
-            // decrypted the TLS message and now is proving to us that they know
-            // the plaintext which encrypts to the ciphertext of this TLS
-            // message.
-            self.decrypter.verify_plaintext(msg).await?;
-        } else {
-            self.decrypter.decrypt_blind(msg).await?;
-        }
+        let decrypt = DecryptRecord {
+            msg,
+            visibility: Visibility::Private,
+        };
+        self.decrypter
+            .decrypt_private(&mut self.vm, &mut self.ctx, vec![decrypt])
+            .await?;
 
         Ok(())
     }
@@ -419,8 +550,7 @@ impl MpcTlsFollower {
         let Active { server_key, buffer } = self.state.take().try_into_active()?;
 
         if !buffer.is_empty() {
-            return Err(MpcTlsError::new(
-                Kind::PeerMisbehaved,
+            return Err(MpcTlsError::peer(
                 "attempted to close connection without decrypting all messages",
             ));
         }
@@ -431,7 +561,7 @@ impl MpcTlsFollower {
     }
 
     async fn commit(&mut self) -> Result<(), MpcTlsError> {
-        let Active { buffer, .. } = self.state.try_as_active()?;
+        let Active { ref mut buffer, .. } = self.state.try_as_active_mut()?;
 
         debug!("leader committed transcript");
 
@@ -440,8 +570,35 @@ impl MpcTlsFollower {
         // Reveal the AEAD key to the leader only if there are TLS messages which need
         // to be decrypted.
         if !buffer.is_empty() {
-            self.decrypter.decode_key_blind().await?;
+            buffer.make_contiguous();
+            self.decrypter
+                .verify_tags(&mut self.vm, &mut self.ctx, buffer.as_slices().0)
+                .await?;
+            self.decode_key().await?;
         }
+
+        Ok(())
+    }
+
+    #[instrument(level = "debug", skip_all, err)]
+    async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
+        let vm = &mut self.vm;
+        let ctx = &mut self.ctx;
+
+        let key = self.cipher.key().map_err(MpcTlsError::cipher)?;
+        let key = transmute(key);
+        let key = Decode::new(vm, self.role, key)?.private(vm)?;
+
+        let iv = self.cipher.iv().map_err(MpcTlsError::cipher)?;
+        let iv = transmute(iv);
+        let iv = Decode::new(vm, self.role, iv)?.private(vm)?;
+
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+
+        let (key, iv) = futures::try_join!(key.decode(), iv.decode())?;
+        self.decrypter.set_key_and_iv(key, iv)?;
 
         Ok(())
     }
@@ -482,7 +639,7 @@ mod state {
 
     impl From<StateError> for MpcTlsError {
         fn from(err: StateError) -> Self {
-            MpcTlsError::new(Kind::State, err)
+            MpcTlsError::state(err)
         }
     }
 

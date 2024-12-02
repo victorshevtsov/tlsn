@@ -3,8 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
-pub mod follower;
-pub mod leader;
+pub(crate) mod follower;
+pub(crate) mod leader;
 
 /// MPC-TLS protocol message.
 #[allow(missing_docs)]
