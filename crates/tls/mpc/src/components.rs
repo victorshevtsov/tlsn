@@ -17,10 +17,7 @@ use mpz_common::{Context, Flush};
 use mpz_fields::{gf2_128::Gf2_128, p256::P256};
 use mpz_memory_core::{binary::Binary, Memory, View};
 use mpz_ole::{ROLEReceiver, ROLESender};
-use mpz_share_conversion::{
-    AdditiveToMultiplicative, MultiplicativeToAdditive, ShareConversionReceiver,
-    ShareConversionSender, ShareConvert,
-};
+use mpz_share_conversion::{ShareConversionReceiver, ShareConversionSender};
 use mpz_vm_core::Vm;
 
 /// Builds the components for MPC-TLS leader.
@@ -42,18 +39,8 @@ pub fn build_leader<Ctx, V, RSP, RRP, RSGF>(
     impl KeyExchange<V> + Flush<Ctx> + Send,
     impl Prf<V> + Send,
     MpcAes,
-    Encrypter<
-        impl ShareConvert<Gf2_128>
-            + AdditiveToMultiplicative<Gf2_128, Future: Send>
-            + MultiplicativeToAdditive<Gf2_128, Future: Send>
-            + Flush<Ctx>,
-    >,
-    Decrypter<
-        impl ShareConvert<Gf2_128>
-            + AdditiveToMultiplicative<Gf2_128, Future: Send>
-            + MultiplicativeToAdditive<Gf2_128, Future: Send>
-            + Flush<Ctx>,
-    >,
+    Encrypter<ShareConversionSender<RSGF, Gf2_128>>,
+    Decrypter<ShareConversionSender<RSGF, Gf2_128>>,
 )
 where
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
@@ -111,18 +98,8 @@ pub fn build_follower<Ctx, V, RSP, RRP, RRGF>(
     impl KeyExchange<V> + Flush<Ctx> + Send,
     impl Prf<V> + Send,
     MpcAes,
-    Encrypter<
-        impl ShareConvert<Gf2_128>
-            + AdditiveToMultiplicative<Gf2_128, Future: Send>
-            + MultiplicativeToAdditive<Gf2_128, Future: Send>
-            + Flush<Ctx>,
-    >,
-    Decrypter<
-        impl ShareConvert<Gf2_128>
-            + AdditiveToMultiplicative<Gf2_128, Future: Send>
-            + MultiplicativeToAdditive<Gf2_128, Future: Send>
-            + Flush<Ctx>,
-    >,
+    Encrypter<ShareConversionReceiver<RRGF, Gf2_128>>,
+    Decrypter<ShareConversionReceiver<RRGF, Gf2_128>>,
 )
 where
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,

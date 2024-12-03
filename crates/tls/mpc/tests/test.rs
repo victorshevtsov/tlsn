@@ -20,7 +20,6 @@ use mpz_ot::{
         ROTReceiver, ROTSender,
     },
 };
-use mpz_share_conversion::ShareConvert;
 use mpz_vm_core::{Execute, Vm};
 use rand::{distributions::Standard, prelude::Distribution, rngs::StdRng, SeedableRng};
 use serio::{Deserialize, Serialize, StreamExt};
@@ -28,7 +27,7 @@ use tls_client::Certificate;
 use tls_client_async::bind_client;
 use tls_mpc::{
     build_follower, build_leader, MpcTlsCommonConfig, MpcTlsFollower, MpcTlsFollowerConfig,
-    MpcTlsLeader, MpcTlsLeaderConfig, TlsRole,
+    MpcTlsLeader, MpcTlsLeaderConfig,
 };
 use tls_server_fixture::{bind_test_server_hyper, CA_CERT_DER, SERVER_DOMAIN};
 use tokio_util::compat::TokioAsyncReadCompatExt;
@@ -41,8 +40,8 @@ fn create_vm<Ctx>(
     sender: impl COTSender<Block> + Flush<Ctx> + Send + 'static,
     receiver: impl COTReceiver<bool, Block, Future: Send> + Flush<Ctx> + Send + 'static,
 ) -> (
-    impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx>,
-    impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx>,
+    impl Vm<Binary> + View<Binary> + Execute<Ctx>,
+    impl Vm<Binary> + View<Binary> + Execute<Ctx>,
 )
 where
     Ctx: Context + 'static,
@@ -98,23 +97,18 @@ where
     (sender, receiver)
 }
 
-const OT_SETUP_COUNT: usize = 1_000_000;
-
-async fn leader<Ctx>(
-    config: MpcTlsCommonConfig,
-    rs_p_0: impl ROLESender<P256> + Flush<Ctx> + Send,
-    rr_p_1: impl ROLEReceiver<P256> + Flush<Ctx> + Send,
-    rs_gf_0: impl ROLESender<Gf2_128> + Flush<Ctx> + Send,
-    rs_gf_1: impl ROLESender<Gf2_128> + Flush<Ctx> + Send,
+async fn leader<Ctx, RSGF>(
+    rs_p_0: impl ROLESender<P256> + Flush<Ctx> + Send + 'static,
+    rr_p_1: impl ROLEReceiver<P256> + Flush<Ctx> + Send + 'static,
+    rs_gf_0: RSGF,
+    rs_gf_1: RSGF,
     mux: TestFramedMux,
     ctx: Ctx,
-    vm: impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    vm: impl Vm<Binary> + View<Binary> + Execute<Ctx> + Send + 'static,
 ) where
-    Ctx: Context + Send,
+    Ctx: Context + Send + 'static,
+    RSGF: ROLESender<Gf2_128> + Flush<Ctx> + Send + 'static,
 {
-    let config = MTConfig::default();
-    let mut rng = StdRng::seed_from_u64(0);
-
     let (ke, prf, cipher, encrypter, decrypter) =
         build_leader::<Ctx, _, _, _, _>(rs_p_0, rr_p_1, rs_gf_0, rs_gf_1);
 
@@ -213,21 +207,18 @@ async fn leader<Ctx>(
     //vm.finalize().await.unwrap();
 }
 
-async fn follower<Ctx>(
-    config: MpcTlsCommonConfig,
-    rs_p_1: impl ROLESender<P256> + Flush<Ctx> + Send,
-    rr_p_0: impl ROLEReceiver<P256> + Flush<Ctx> + Send,
-    rr_gf_0: impl ROLEReceiver<Gf2_128> + Flush<Ctx> + Send,
-    rr_gf_1: impl ROLEReceiver<Gf2_128> + Flush<Ctx> + Send,
+async fn follower<Ctx, RRGF>(
+    rs_p_1: impl ROLESender<P256> + Flush<Ctx> + Send + 'static,
+    rr_p_0: impl ROLEReceiver<P256> + Flush<Ctx> + Send + 'static,
+    rr_gf_0: RRGF,
+    rr_gf_1: RRGF,
     mux: TestFramedMux,
     ctx: Ctx,
-    vm: impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    vm: impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send + 'static,
 ) where
-    Ctx: Context + Send,
+    RRGF: ROLEReceiver<Gf2_128> + Flush<Ctx> + Send + 'static,
+    Ctx: Context + Send + 'static,
 {
-    let config = MTConfig::default();
-    let mut rng = StdRng::seed_from_u64(1);
-
     let (ke, prf, cipher, encrypter, decrypter) =
         build_follower::<Ctx, _, _, _, _>(rs_p_1, rr_p_0, rr_gf_0, rr_gf_1);
 
@@ -284,9 +275,7 @@ async fn test() {
     let receiver = DerandCOTReceiver::new(receiver);
     let (gen, ev) = create_vm(sender, receiver);
 
-    let common_config = MpcTlsCommonConfig::builder().build().unwrap();
     let (leader_mux, follower_mux) = test_framed_mux(8);
-
     let mt_config = MTConfig::default();
     let (ctx_leader, ctx_follower) = futures::try_join!(
         MTExecutor::new(leader_mux.clone(), mt_config.clone()).new_thread(),
@@ -296,7 +285,6 @@ async fn test() {
 
     tokio::join!(
         leader(
-            common_config.clone(),
             p256_sender_0,
             p256_receiver_1,
             gf2_sender_0,
@@ -306,7 +294,6 @@ async fn test() {
             gen
         ),
         follower(
-            common_config.clone(),
             p256_sender_1,
             p256_receiver_0,
             gf2_receiver_0,
