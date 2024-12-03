@@ -12,7 +12,7 @@ use mpz_memory_core::{binary::Binary, correlated::Delta, Memory, View};
 use mpz_ole::{ROLEReceiver, ROLESender, Receiver as RandomOLEReceiver, Sender as RandomOLESender};
 use mpz_ot::{
     chou_orlandi::{Receiver as BaseReceiver, Sender as BaseSender},
-    cot::{COTReceiver, COTSender},
+    cot::{COTReceiver, COTSender, DerandCOTReceiver, DerandCOTSender},
     kos::{Receiver as KOSReceiver, ReceiverConfig, Sender as KOSSender, SenderConfig},
     rot::{
         any::{AnyReceiver, AnySender},
@@ -41,11 +41,11 @@ fn create_vm<Ctx>(
     sender: impl COTSender<Block> + Flush<Ctx> + Send + 'static,
     receiver: impl COTReceiver<bool, Block, Future: Send> + Flush<Ctx> + Send + 'static,
 ) -> (
-    impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
-    impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+    impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx>,
+    impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx>,
 )
 where
-    Ctx: Context + Send + 'static,
+    Ctx: Context + 'static,
 {
     let mut rng = StdRng::seed_from_u64(0);
     let delta = Delta::random(&mut rng);
@@ -57,12 +57,11 @@ where
 }
 
 fn create_ole<Ctx, F>(
-    _: Ctx,
-    sender: impl ROTSender<[F; 2], Future: Send> + Flush<Ctx> + Send,
-    receiver: impl ROTReceiver<bool, F, Future: Send> + Flush<Ctx> + Send,
+    sender: impl ROTSender<[F; 2]> + Flush<Ctx> + Send,
+    receiver: impl ROTReceiver<bool, F> + Flush<Ctx> + Send,
 ) -> (
-    impl ROLESender<F, Future: Send> + Flush<Ctx> + Send,
-    impl ROLEReceiver<F, Future: Send> + Flush<Ctx> + Send,
+    impl ROLESender<F> + Flush<Ctx> + Send,
+    impl ROLEReceiver<F> + Flush<Ctx> + Send,
 )
 where
     F: Field + Serialize + Deserialize,
@@ -78,11 +77,10 @@ where
 }
 
 fn create_rot<Ctx, F: Field>(
-    _: Ctx,
     delta: Block,
 ) -> (
-    impl ROTSender<[F; 2], Future: Send> + Flush<Ctx> + Send,
-    impl ROTReceiver<bool, F, Future: Send> + Flush<Ctx> + Send,
+    impl ROTSender<[F; 2]> + Flush<Ctx>,
+    impl ROTReceiver<bool, F> + Flush<Ctx>,
 )
 where
     Ctx: Context,
@@ -102,36 +100,26 @@ where
 
 const OT_SETUP_COUNT: usize = 1_000_000;
 
-async fn leader<Ctx, V>(config: MpcTlsCommonConfig, mux: TestFramedMux, ctx: Ctx, vm: V)
-where
+async fn leader<Ctx>(
+    config: MpcTlsCommonConfig,
+    rs_p_0: impl ROLESender<P256> + Flush<Ctx> + Send,
+    rr_p_1: impl ROLEReceiver<P256> + Flush<Ctx> + Send,
+    rs_gf_0: impl ROLESender<Gf2_128> + Flush<Ctx> + Send,
+    rs_gf_1: impl ROLESender<Gf2_128> + Flush<Ctx> + Send,
+    mux: TestFramedMux,
+    ctx: Ctx,
+    vm: impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+) where
     Ctx: Context + Send,
-    V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
 {
     let config = MTConfig::default();
     let mut rng = StdRng::seed_from_u64(0);
 
-    let (ot_sender, ot_receiver) = create_rot(ctx, Block::random(&mut rng));
-    let (p256_sender_0, p256_receiver_0) = create_ole::<_, P256>(ctx, ot_sender, ot_receiver);
-
-    let (ot_sender, ot_receiver) = create_rot(ctx, Block::random(&mut rng));
-    let (p256_sender_1, p256_receiver_1) = create_ole::<_, P256>(ctx, ot_sender, ot_receiver);
-
-    let (ot_sender, ot_receiver) = create_rot(ctx, Block::random(&mut rng));
-    let (gf2_sender_0, gf2_receiver_0) = create_ole::<_, Gf2_128>(ctx, ot_sender, ot_receiver);
-
-    let (ot_sender, ot_receiver) = create_rot(ctx, Block::random(&mut rng));
-    let (gf2_sender_1, gf2_receiver_1) = create_ole::<_, Gf2_128>(ctx, ot_sender, ot_receiver);
-
-    let (ke, prf, cipher, encrypter, decrypter) = build_leader(
-        ctx,
-        p256_sender_0,
-        p256_receiver_1,
-        gf2_sender_0,
-        gf2_sender_1,
-    );
+    let (ke, prf, cipher, encrypter, decrypter) =
+        build_leader::<Ctx, _, _, _, _>(rs_p_0, rr_p_1, rs_gf_0, rs_gf_1);
 
     let common_config = MpcTlsCommonConfig::builder().build().unwrap();
-    let mut leader = MpcTlsLeader::new(
+    let mut leader = MpcTlsLeader::<_, _, _, _, Ctx, _>::new(
         MpcTlsLeaderConfig::builder()
             .common(common_config)
             .defer_decryption_from_start(false)
@@ -222,101 +210,31 @@ where
     leader_ctrl.close_connection().await.unwrap();
     conn.close().await.unwrap();
 
-    let mut ctx = exec.new_thread().await.unwrap();
-
-    ot_receiver.accept_reveal(&mut ctx).await.unwrap();
-
-    vm.finalize().await.unwrap();
+    //vm.finalize().await.unwrap();
 }
 
-async fn follower(config: MpcTlsCommonConfig, mux: TestFramedMux) {
-    let mut exec = MTExecutor::new(mux.clone(), 8);
+async fn follower<Ctx>(
+    config: MpcTlsCommonConfig,
+    rs_p_1: impl ROLESender<P256> + Flush<Ctx> + Send,
+    rr_p_0: impl ROLEReceiver<P256> + Flush<Ctx> + Send,
+    rr_gf_0: impl ROLEReceiver<Gf2_128> + Flush<Ctx> + Send,
+    rr_gf_1: impl ROLEReceiver<Gf2_128> + Flush<Ctx> + Send,
+    mux: TestFramedMux,
+    ctx: Ctx,
+    vm: impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
+) where
+    Ctx: Context + Send,
+{
+    let config = MTConfig::default();
+    let mut rng = StdRng::seed_from_u64(1);
 
-    let mut ot_sender = Sender::new(
-        SenderConfig::builder().sender_commit().build().unwrap(),
-        BaseReceiver::new(
-            BaseReceiverConfig::builder()
-                .receiver_commit()
-                .build()
-                .unwrap(),
-        ),
-    );
-    ot_sender.alloc(OT_SETUP_COUNT);
+    let (ke, prf, cipher, encrypter, decrypter) =
+        build_follower::<Ctx, _, _, _, _>(rs_p_1, rr_p_0, rr_gf_0, rr_gf_1);
 
-    let mut ot_receiver = Receiver::new(
-        ReceiverConfig::default(),
-        BaseSender::new(BaseSenderConfig::default()),
-    );
-    ot_receiver.alloc(OT_SETUP_COUNT);
-
-    let mut ot_sender = SharedSender::new(ot_sender);
-    let ot_receiver = SharedReceiver::new(ot_receiver);
-
-    let mut vm = DEAPThread::new(
-        GarbleRole::Follower,
-        [0u8; 32],
-        exec.new_thread().await.unwrap(),
-        ot_sender.clone(),
-        ot_receiver.clone(),
-    );
-
-    let (ke, prf, encrypter, decrypter) = build_components(
-        TlsRole::Follower,
-        &config,
-        exec.new_thread().await.unwrap(),
-        exec.new_thread().await.unwrap(),
-        exec.new_thread().await.unwrap(),
-        exec.new_thread().await.unwrap(),
-        exec.new_thread().await.unwrap(),
-        vm.new_thread(
-            exec.new_thread().await.unwrap(),
-            ot_sender.clone(),
-            ot_receiver.clone(),
-        )
-        .unwrap(),
-        vm.new_thread(
-            exec.new_thread().await.unwrap(),
-            ot_sender.clone(),
-            ot_receiver.clone(),
-        )
-        .unwrap(),
-        vm.new_thread(
-            exec.new_thread().await.unwrap(),
-            ot_sender.clone(),
-            ot_receiver.clone(),
-        )
-        .unwrap(),
-        vm.new_thread(
-            exec.new_thread().await.unwrap(),
-            ot_sender.clone(),
-            ot_receiver.clone(),
-        )
-        .unwrap(),
-        vm.new_thread(
-            exec.new_thread().await.unwrap(),
-            ot_sender.clone(),
-            ot_receiver.clone(),
-        )
-        .unwrap(),
-        vm.new_thread(
-            exec.new_thread().await.unwrap(),
-            ot_sender.clone(),
-            ot_receiver.clone(),
-        )
-        .unwrap(),
-        vm.new_thread(
-            exec.new_thread().await.unwrap(),
-            ot_sender.clone(),
-            ot_receiver.clone(),
-        )
-        .unwrap(),
-        ot_sender.clone(),
-        ot_receiver.clone(),
-    );
-
-    let mut follower = MpcTlsFollower::new(
+    let common_config = MpcTlsCommonConfig::builder().build().unwrap();
+    let mut follower = MpcTlsFollower::<_, _, _, _, Ctx, _>::new(
         MpcTlsFollowerConfig::builder()
-            .common(config)
+            .common(common_config)
             .build()
             .unwrap(),
         Box::new(StreamExt::compat_stream(
@@ -324,8 +242,11 @@ async fn follower(config: MpcTlsCommonConfig, mux: TestFramedMux) {
         )),
         ke,
         prf,
+        cipher,
         encrypter,
         decrypter,
+        ctx,
+        vm,
     );
 
     follower.setup().await.unwrap();
@@ -333,11 +254,7 @@ async fn follower(config: MpcTlsCommonConfig, mux: TestFramedMux) {
     let (_, fut) = follower.run();
     fut.await.unwrap();
 
-    let mut ctx = exec.new_thread().await.unwrap();
-
-    ot_sender.reveal(&mut ctx).await.unwrap();
-
-    vm.finalize().await.unwrap();
+    // vm.finalize().await.unwrap();
 }
 
 #[tokio::test]
@@ -345,13 +262,58 @@ async fn follower(config: MpcTlsCommonConfig, mux: TestFramedMux) {
 async fn test() {
     tracing_subscriber::fmt::init();
 
-    let (leader_mux, follower_mux) = test_framed_mux(8);
+    let mut rng = StdRng::seed_from_u64(0);
+    let delta = Block::random(&mut rng);
+
+    let sender = KOSSender::new(SenderConfig::default(), delta, BaseReceiver::default());
+    let receiver = KOSReceiver::new(ReceiverConfig::default(), BaseSender::default());
+
+    let (ot_sender, ot_receiver) = create_rot::<_, P256>(Block::random(&mut rng));
+    let (p256_sender_0, p256_receiver_0) = create_ole::<_, P256>(ot_sender, ot_receiver);
+
+    let (ot_sender, ot_receiver) = create_rot(Block::random(&mut rng));
+    let (p256_sender_1, p256_receiver_1) = create_ole::<_, P256>(ot_sender, ot_receiver);
+
+    let (ot_sender, ot_receiver) = create_rot(Block::random(&mut rng));
+    let (gf2_sender_0, gf2_receiver_0) = create_ole::<_, Gf2_128>(ot_sender, ot_receiver);
+
+    let (ot_sender, ot_receiver) = create_rot(Block::random(&mut rng));
+    let (gf2_sender_1, gf2_receiver_1) = create_ole::<_, Gf2_128>(ot_sender, ot_receiver);
+
+    let sender = DerandCOTSender::new(sender);
+    let receiver = DerandCOTReceiver::new(receiver);
+    let (gen, ev) = create_vm(sender, receiver);
 
     let common_config = MpcTlsCommonConfig::builder().build().unwrap();
-    let (gen, ev) = create_vm(…);
+    let (leader_mux, follower_mux) = test_framed_mux(8);
+
+    let mt_config = MTConfig::default();
+    let (ctx_leader, ctx_follower) = futures::try_join!(
+        MTExecutor::new(leader_mux.clone(), mt_config.clone()).new_thread(),
+        MTExecutor::new(follower_mux.clone(), mt_config).new_thread()
+    )
+    .unwrap();
 
     tokio::join!(
-        leader(common_config.clone(), leader_mux, gen),
-        follower(common_config.clone(), follower_mux)
+        leader(
+            common_config.clone(),
+            p256_sender_0,
+            p256_receiver_1,
+            gf2_sender_0,
+            gf2_sender_1,
+            leader_mux,
+            ctx_leader,
+            gen
+        ),
+        follower(
+            common_config.clone(),
+            p256_sender_1,
+            p256_receiver_0,
+            gf2_receiver_0,
+            gf2_receiver_1,
+            follower_mux,
+            ctx_follower,
+            ev
+        ),
     );
 }

@@ -34,7 +34,6 @@ use mpz_vm_core::Vm;
 #[allow(clippy::type_complexity)]
 #[allow(clippy::implied_bounds_in_impls)]
 pub fn build_leader<Ctx, V, RSP, RRP, RSGF>(
-    _: Ctx,
     rs_p: RSP,
     rr_p: RRP,
     rs_gf0: RSGF,
@@ -101,23 +100,36 @@ where
 /// * `rr_p` - ROLE receiver for P256 field elements.
 /// * `rr_gf0` - ROLE receiver for Gf2_128 field elements.
 /// * `rr_gf1` - ROLE receiver for Gf2_128 field elements.
-pub fn build_follower<V, RSP, RRP, RRGF>(
+#[allow(clippy::type_complexity)]
+#[allow(clippy::implied_bounds_in_impls)]
+pub fn build_follower<Ctx, V, RSP, RRP, RRGF>(
     rs_p: RSP,
     rr_p: RRP,
     rr_gf0: RRGF,
     rr_gf1: RRGF,
 ) -> (
-    impl KeyExchange<V>,
-    impl Prf<V>,
+    impl KeyExchange<V> + Flush<Ctx> + Send,
+    impl Prf<V> + Send,
     MpcAes,
-    Encrypter<impl ShareConvert<Gf2_128>>,
-    Decrypter<impl ShareConvert<Gf2_128>>,
+    Encrypter<
+        impl ShareConvert<Gf2_128>
+            + AdditiveToMultiplicative<Gf2_128, Future: Send>
+            + MultiplicativeToAdditive<Gf2_128, Future: Send>
+            + Flush<Ctx>,
+    >,
+    Decrypter<
+        impl ShareConvert<Gf2_128>
+            + AdditiveToMultiplicative<Gf2_128, Future: Send>
+            + MultiplicativeToAdditive<Gf2_128, Future: Send>
+            + Flush<Ctx>,
+    >,
 )
 where
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Send,
-    RSP: ROLESender<P256> + Send,
-    RRP: ROLEReceiver<P256> + Send,
-    RRGF: ROLEReceiver<Gf2_128> + Send,
+    RSP: ROLESender<P256> + Flush<Ctx> + Send,
+    RRP: ROLEReceiver<P256> + Flush<Ctx> + Send,
+    RRGF: ROLEReceiver<Gf2_128> + Flush<Ctx> + Send,
+    Ctx: Context,
 {
     let role = TlsRole::Follower;
 
