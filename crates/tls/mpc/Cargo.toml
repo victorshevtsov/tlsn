@@ -28,13 +28,11 @@ mpz-core = { workspace = true }
 mpz-fields = { workspace = true }
 mpz-garble = { workspace = true }
 mpz-ole = { workspace = true }
-mpz-ot = { workspace = true }
 mpz-share-conversion = { workspace = true }
 mpz-vm-core = { workspace = true }
 mpz-memory-core = { workspace = true }
 mpz-circuits = { workspace = true }
 
-uid-mux = { workspace = true, features = ["serio"] }
 ludi = { git = "https://github.com/sinui0/ludi", rev = "e511c3b", default-features = false }
 serio = { workspace = true }
 
@@ -47,26 +45,23 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
-ghash_rc = { package = "ghash", version = "0.5", optional = true }
 opaque-debug = { workspace = true }
 aes = { workspace = true }
 ctr = { workspace = true }
+ghash_rc = { package = "ghash", version = "0.5" }
 cipher-crate = { package = "cipher", version = "0.4" }
 
 
 [dev-dependencies]
-mpz-common = { workspace = true , features = ["test-utils"] }
-mpz-share-conversion = { workspace = true , features = ["test-utils"] }
+mpz-ole = { workspace = true, features = ["test-utils"] }
+mpz-ot = { workspace = true }
 
-serio = { workspace = true, features = ["compat"] }
 tls-server-fixture = { workspace = true }
 tlsn-tls-client = { workspace = true }
 tlsn-tls-client-async = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["compat"] }
 tracing-subscriber = { workspace = true }
-ghash_rc = { package = "ghash", version = "0.5" }
 rand_chacha = { workspace = true }
-rand = { workspace = true }
 generic-array = { workspace = true }
 uid-mux = { workspace = true, features = ["serio", "test-utils"] }

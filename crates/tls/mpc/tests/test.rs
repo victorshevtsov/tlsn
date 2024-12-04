@@ -8,20 +8,11 @@ use mpz_common::{
 use mpz_core::Block;
 use mpz_fields::{gf2_128::Gf2_128, p256::P256, Field};
 use mpz_garble::protocol::semihonest::{Evaluator, Generator};
-use mpz_memory_core::{binary::Binary, correlated::Delta, Memory, View};
-use mpz_ole::{ROLEReceiver, ROLESender, Receiver as RandomOLEReceiver, Sender as RandomOLESender};
-use mpz_ot::{
-    chou_orlandi::{Receiver as BaseReceiver, Sender as BaseSender},
-    cot::{COTReceiver, COTSender, DerandCOTReceiver, DerandCOTSender},
-    kos::{Receiver as KOSReceiver, ReceiverConfig, Sender as KOSSender, SenderConfig},
-    rot::{
-        any::{AnyReceiver, AnySender},
-        randomize::{RandomizeRCOTReceiver, RandomizeRCOTSender},
-        ROTReceiver, ROTSender,
-    },
-};
+use mpz_memory_core::{binary::Binary, correlated::Delta, View};
+use mpz_ole::{ideal::IdealROLE, ROLEReceiver, ROLESender};
+use mpz_ot::ideal::cot::ideal_cot;
 use mpz_vm_core::{Execute, Vm};
-use rand::{distributions::Standard, prelude::Distribution, rngs::StdRng, SeedableRng};
+use rand::{rngs::StdRng, SeedableRng};
 use serio::{Deserialize, Serialize, StreamExt};
 use tls_client::Certificate;
 use tls_client_async::bind_client;
@@ -36,10 +27,7 @@ use uid_mux::{
     FramedUidMux,
 };
 
-fn create_vm<Ctx>(
-    sender: impl COTSender<Block> + Flush<Ctx> + Send + 'static,
-    receiver: impl COTReceiver<bool, Block, Future: Send> + Flush<Ctx> + Send + 'static,
-) -> (
+fn create_vm<Ctx>() -> (
     impl Vm<Binary> + View<Binary> + Execute<Ctx>,
     impl Vm<Binary> + View<Binary> + Execute<Ctx>,
 )
@@ -47,18 +35,17 @@ where
     Ctx: Context + 'static,
 {
     let mut rng = StdRng::seed_from_u64(0);
-    let delta = Delta::random(&mut rng);
+    let block = Block::random(&mut rng);
+    let (sender, receiver) = ideal_cot(block);
 
+    let delta = Delta::new(block);
     let gen = Generator::new(sender, [0u8; 16], delta);
     let ev = Evaluator::new(receiver);
 
     (gen, ev)
 }
 
-fn create_ole<Ctx, F>(
-    sender: impl ROTSender<[F; 2]> + Flush<Ctx> + Send,
-    receiver: impl ROTReceiver<bool, F> + Flush<Ctx> + Send,
-) -> (
+fn create_role<Ctx, F>() -> (
     impl ROLESender<F> + Flush<Ctx> + Send,
     impl ROLEReceiver<F> + Flush<Ctx> + Send,
 )
@@ -66,33 +53,12 @@ where
     F: Field + Serialize + Deserialize,
     Ctx: Context,
 {
-    let mut rng = StdRng::seed_from_u64(1);
-    let seed = Block::random(&mut rng);
+    let mut rng = StdRng::seed_from_u64(0);
+    let block = Block::random(&mut rng);
+    let role = IdealROLE::new(block);
 
-    let role_sender = RandomOLESender::new(seed, sender);
-    let role_receiver = RandomOLEReceiver::new(receiver);
-
-    (role_sender, role_receiver)
-}
-
-fn create_rot<Ctx, F: Field>(
-    delta: Block,
-) -> (
-    impl ROTSender<[F; 2]> + Flush<Ctx>,
-    impl ROTReceiver<bool, F> + Flush<Ctx>,
-)
-where
-    Ctx: Context,
-    Standard: Distribution<F>,
-{
-    let sender = KOSSender::new(SenderConfig::default(), delta, BaseReceiver::default());
-    let receiver = KOSReceiver::new(ReceiverConfig::default(), BaseSender::default());
-
-    let sender = RandomizeRCOTSender::new(sender);
-    let receiver = RandomizeRCOTReceiver::new(receiver);
-
-    let sender = AnySender::new(sender);
-    let receiver = AnyReceiver::new(receiver);
+    let sender = role.clone();
+    let receiver = role;
 
     (sender, receiver)
 }
@@ -214,7 +180,7 @@ async fn follower<Ctx, RRGF>(
     rr_gf_1: RRGF,
     mux: TestFramedMux,
     ctx: Ctx,
-    vm: impl Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send + 'static,
+    vm: impl Vm<Binary> + View<Binary> + Execute<Ctx> + Send + 'static,
 ) where
     RRGF: ROLEReceiver<Gf2_128> + Flush<Ctx> + Send + 'static,
     Ctx: Context + Send + 'static,
@@ -253,35 +219,21 @@ async fn follower<Ctx, RRGF>(
 async fn test() {
     tracing_subscriber::fmt::init();
 
-    let mut rng = StdRng::seed_from_u64(0);
-    let delta = Block::random(&mut rng);
-
-    let sender = KOSSender::new(SenderConfig::default(), delta, BaseReceiver::default());
-    let receiver = KOSReceiver::new(ReceiverConfig::default(), BaseSender::default());
-
-    let (ot_sender, ot_receiver) = create_rot::<_, P256>(Block::random(&mut rng));
-    let (p256_sender_0, p256_receiver_0) = create_ole::<_, P256>(ot_sender, ot_receiver);
-
-    let (ot_sender, ot_receiver) = create_rot(Block::random(&mut rng));
-    let (p256_sender_1, p256_receiver_1) = create_ole::<_, P256>(ot_sender, ot_receiver);
-
-    let (ot_sender, ot_receiver) = create_rot(Block::random(&mut rng));
-    let (gf2_sender_0, gf2_receiver_0) = create_ole::<_, Gf2_128>(ot_sender, ot_receiver);
-
-    let (ot_sender, ot_receiver) = create_rot(Block::random(&mut rng));
-    let (gf2_sender_1, gf2_receiver_1) = create_ole::<_, Gf2_128>(ot_sender, ot_receiver);
-
-    let sender = DerandCOTSender::new(sender);
-    let receiver = DerandCOTReceiver::new(receiver);
-    let (gen, ev) = create_vm(sender, receiver);
-
     let (leader_mux, follower_mux) = test_framed_mux(8);
     let mt_config = MTConfig::default();
+
     let (ctx_leader, ctx_follower) = futures::try_join!(
         MTExecutor::new(leader_mux.clone(), mt_config.clone()).new_thread(),
         MTExecutor::new(follower_mux.clone(), mt_config).new_thread()
     )
     .unwrap();
+
+    let (gen, ev) = create_vm();
+
+    let (p256_sender_0, p256_receiver_0) = create_role::<_, P256>();
+    let (p256_sender_1, p256_receiver_1) = create_role::<_, P256>();
+    let (gf2_sender_0, gf2_receiver_0) = create_role::<_, Gf2_128>();
+    let (gf2_sender_1, gf2_receiver_1) = create_role::<_, Gf2_128>();
 
     tokio::join!(
         leader(
