@@ -54,7 +54,7 @@ impl<K, P, C, Sc, Ctx, V> MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -89,7 +89,7 @@ impl<K, P, C, Sc, Ctx, V> Actor for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -113,7 +113,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for MpcTls
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -495,7 +495,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -518,7 +518,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetProtocolVersion>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -539,7 +539,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -561,7 +561,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetCipherSuite> for MpcTlsLeader<K, 
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -582,7 +582,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -604,7 +604,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetSuite> for MpcTlsLeader<K, P, C, 
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -625,7 +625,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -647,7 +647,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetEncrypt> for MpcTlsLeader<K, P, C
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -668,7 +668,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -690,7 +690,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetDecrypt> for MpcTlsLeader<K, P, C
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -711,7 +711,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -733,7 +733,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetClientRandom> for MpcTlsLeader<K,
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -755,7 +755,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -777,7 +777,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetClientKeyShare> for MpcTlsLeader<
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -798,7 +798,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -820,7 +820,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetServerRandom> for MpcTlsLeader<K,
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -842,7 +842,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -864,7 +864,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetServerKeyShare> for MpcTlsLeader<
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -886,7 +886,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -909,7 +909,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetServerCertDetails>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -931,7 +931,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -954,7 +954,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetServerKxDetails>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -976,7 +976,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -999,7 +999,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetHsHashClientKeyExchange>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1021,7 +1021,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1044,7 +1044,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgSetHsHashServerHello>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1066,7 +1066,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1089,7 +1089,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetServerFinishedVd>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1111,7 +1111,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1134,7 +1134,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetClientFinishedVd>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1156,7 +1156,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1178,7 +1178,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgPrepareEncryption> for MpcTlsLeader<
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1199,7 +1199,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1221,7 +1221,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgEncrypt> for MpcTlsLeader<K, P, C, S
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1242,7 +1242,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1264,7 +1264,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgDecrypt> for MpcTlsLeader<K, P, C, S
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1285,7 +1285,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1307,7 +1307,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgBufferIncoming> for MpcTlsLeader<K, 
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1328,7 +1328,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1350,7 +1350,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgNextIncoming> for MpcTlsLeader<K, P,
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1371,7 +1371,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1393,7 +1393,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgGetNotify> for MpcTlsLeader<K, P, C,
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1414,7 +1414,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1436,7 +1436,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgBufferLen> for MpcTlsLeader<K, P, C,
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1457,7 +1457,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Backen
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1479,7 +1479,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<BackendMsgServerClosed> for MpcTlsLeader<K, P,
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1500,7 +1500,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for DeferD
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1522,7 +1522,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<DeferDecryption> for MpcTlsLeader<K, P, C, Sc,
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1543,7 +1543,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for CloseC
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1565,7 +1565,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<CloseConnection> for MpcTlsLeader<K, P, C, Sc,
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1586,7 +1586,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsLeader<K, P, C, Sc, Ctx, V>> for Commit
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -1608,7 +1608,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<Commit> for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,

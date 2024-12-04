@@ -84,7 +84,7 @@ impl<K, P, C, Sc, Ctx, V> MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -203,10 +203,6 @@ where
         vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
-        self.prf
-            .flush(ctx)
-            .await
-            .map_err(MpcTlsError::key_exchange)?;
         self.ke
             .flush(ctx)
             .await
@@ -504,7 +500,7 @@ impl<K, P, C, Sc, Ctx, V> Backend for MpcTlsLeader<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,

@@ -36,7 +36,7 @@ impl<K, P, C, Sc, Ctx, V> ludi::Actor for MpcTlsFollower<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -67,7 +67,7 @@ impl<K, P, C, Sc, Ctx, V> MpcTlsFollower<K, P, C, Sc, Ctx, V>
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -130,7 +130,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Comp
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -152,7 +152,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<ComputeKeyExchange> for MpcTlsFollower<K, P, C
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -178,7 +178,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Clie
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -200,7 +200,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<ClientFinishedVd> for MpcTlsFollower<K, P, C, 
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -222,7 +222,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Serv
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -244,7 +244,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<ServerFinishedVd> for MpcTlsFollower<K, P, C, 
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -266,7 +266,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Encr
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -288,7 +288,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<EncryptClientFinished> for MpcTlsFollower<K, P
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -309,7 +309,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Encr
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -331,7 +331,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<EncryptAlert> for MpcTlsFollower<K, P, C, Sc, 
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -352,7 +352,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Encr
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -374,7 +374,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<EncryptMessage> for MpcTlsFollower<K, P, C, Sc
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -395,7 +395,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Decr
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -417,7 +417,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<DecryptServerFinished> for MpcTlsFollower<K, P
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -439,7 +439,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Decr
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -461,7 +461,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<DecryptAlert> for MpcTlsFollower<K, P, C, Sc, 
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -483,7 +483,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Comm
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -505,7 +505,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<CommitMessage> for MpcTlsFollower<K, P, C, Sc,
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -527,7 +527,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Decr
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -549,7 +549,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<DecryptMessage> for MpcTlsFollower<K, P, C, Sc
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -570,7 +570,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Clos
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -592,7 +592,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<CloseConnection> for MpcTlsFollower<K, P, C, S
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -615,7 +615,7 @@ impl<K, P, C, Sc, Ctx, V> Dispatch<MpcTlsFollower<K, P, C, Sc, Ctx, V>> for Comm
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
@@ -637,7 +637,7 @@ impl<K, P, C, Sc, Ctx, V> Handler<Commit> for MpcTlsFollower<K, P, C, Sc, Ctx, V
 where
     Self: Send,
     K: KeyExchange<V> + Send + Flush<Ctx>,
-    P: Prf<V> + Send + Flush<Ctx>,
+    P: Prf<V> + Send,
     C: Cipher<Aes128, V> + Send,
     Ctx: Context + Send,
     V: Vm<Binary> + View<Binary> + Memory<Binary> + Execute<Ctx> + Send,
