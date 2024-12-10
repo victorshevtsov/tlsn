@@ -61,3 +61,7 @@ path = "interactive/interactive.rs"
 [[example]]
 name = "coingecko"
 path = "discord/coingecko.rs"
+
+[[example]]
+name = "jsonplaceholder"
+path = "discord/jsonplaceholder.rs"
