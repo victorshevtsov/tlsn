@@ -57,3 +57,7 @@ path = "interactive/interactive.rs"
 [[example]]
 name = "discord_dm"
 path = "discord/discord_dm.rs"
+
+[[example]]
+name = "coingecko"
+path = "discord/coingecko.rs"
