@@ -13,10 +13,10 @@ server:
 
 notarization:
   max-sent-data: 4096
-  max-recv-data: 16384
+  max-recv-data: 32768
 
 tls:
-  enabled: true
+  enabled: false
   private-key-pem-path: "./fixture/tls/notary.key"
   certificate-pem-path: "./fixture/tls/notary.crt"
 
