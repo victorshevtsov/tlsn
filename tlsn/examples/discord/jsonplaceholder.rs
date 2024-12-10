@@ -14,7 +14,7 @@ use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use tracing::debug;
 
 // Setting of the application server
-const SERVER_DOMAIN: &str = "discord.com";
+const SERVER_DOMAIN: &str = "jsonplaceholder.typicode.com";
 
 // Setting of the notary server — make sure these are the same with the config in ../../../notary/server
 const NOTARY_HOST: &str = "127.0.0.1";
@@ -27,17 +27,19 @@ const NOTARY_PORT: u16 = 7047;
 // Maximum number of bytes that can be sent from prover to server
 const MAX_SENT_DATA: usize = 1 << 12;
 // Maximum number of bytes that can be received by prover from server
-const MAX_RECV_DATA: usize = 1 << 14;
+const MAX_RECV_DATA: usize = 1 << 15;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+    let time1 = std::time::Instant::now(); // Start timing
 
     // Load secret variables frome environment for discord server connection
     dotenv::dotenv().ok();
-    let channel_id = env::var("CHANNEL_ID").unwrap();
-    let auth_token = env::var("AUTHORIZATION").unwrap();
-    let user_agent = env::var("USER_AGENT").unwrap();
+    let auth_token = env::var("AUTHORIZATION").unwrap_or("secret_auth_token".into());
+    let user_agent = env::var("USER_AGENT").unwrap_or(
+        "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/116.0".into(),
+    );
 
     // Build a client to connect to the notary server.
     let notary_client = NotaryClient::builder()
@@ -56,6 +58,8 @@ async fn main() {
         .build()
         .unwrap();
 
+    let time2 = std::time::Instant::now(); // Start timing
+
     let Accepted {
         io: notary_connection,
         id: session_id,
@@ -64,6 +68,8 @@ async fn main() {
         .request_notarization(notarization_request)
         .await
         .unwrap();
+
+    let time3 = std::time::Instant::now(); // Start timing
 
     // Configure a new prover with the unique session id returned from notary client.
     let prover_config = ProverConfig::builder()
@@ -100,11 +106,11 @@ async fn main() {
     // Spawn the HTTP task to be run concurrently
     tokio::spawn(connection);
 
+    let time4 = std::time::Instant::now(); // Start timing
+
     // Build the HTTP request to fetch the DMs
     let request = Request::builder()
-        .uri(format!(
-            "https://{SERVER_DOMAIN}/api/v9/channels/{channel_id}/messages?limit=2"
-        ))
+        .uri("https://jsonplaceholder.typicode.com/posts")
         .header("Host", SERVER_DOMAIN)
         .header("Accept", "*/*")
         .header("Accept-Language", "en-US,en;q=0.5")
@@ -118,6 +124,8 @@ async fn main() {
     debug!("Sending request");
 
     let response = request_sender.send_request(request).await.unwrap();
+
+    let time5 = std::time::Instant::now(); // Start timing
 
     debug!("Sent request");
 
@@ -159,6 +167,30 @@ async fn main() {
     let notarized_session = prover.finalize().await.unwrap();
 
     debug!("Notarization complete!");
+
+    let time6 = std::time::Instant::now(); // Start timing
+
+    println!(
+        "Time from start to notary client setup: {:?}",
+        time2.duration_since(time1)
+    );
+    println!(
+        "Time from notary client setup to connection: {:?}",
+        time3.duration_since(time2)
+    );
+    println!(
+        "Time from connection to HTTP handshake: {:?}",
+        time4.duration_since(time3)
+    );
+    println!(
+        "Time from HTTP handshake to request/response: {:?}",
+        time5.duration_since(time4)
+    );
+    println!(
+        "Time from request send to return: {:?}",
+        time6.duration_since(time5)
+    );
+    println!("Time total: {:?}", time6.duration_since(time1));
 
     // Dump the notarized session to a file
     let mut file = tokio::fs::File::create("discord_dm_notarized_session.json")
