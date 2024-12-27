@@ -340,6 +340,15 @@ impl MpcTlsLeader {
 
         self.committed = true;
 
+        // If the first message in the buffer is Alert it's highly likely
+        // that the connection has been closed by the remote peer.
+        // Therefore, there is nothing to decrypt (in that case the decrypter hangs)
+        if self.buffer.len() == 1 && self.buffer[0].typ == ContentType::Alert {
+            let msg = self.buffer.pop_front().unwrap();
+            tracing::debug!("Got alert message: {:?}", msg);
+            return Ok(());
+        }
+
         if !self.buffer.is_empty() {
             self.decrypter.decode_key_private().await?;
             self.is_decrypting = true;
