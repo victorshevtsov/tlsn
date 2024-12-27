@@ -6,6 +6,7 @@
 //! The TLS prover provides a low-level API, see the [`HTTP prover`](crate::http) which provides
 //! abstractions for working with HTTP sessions.
 
+mod abort;
 mod config;
 mod error;
 mod future;
@@ -16,7 +17,7 @@ pub mod state;
 pub use config::{ProverConfig, ProverConfigBuilder, ProverConfigBuilderError};
 pub use error::ProverError;
 pub use future::ProverFuture;
-use state::{Notarize, Prove};
+use state::{Abort, Notarize, Prove};
 
 use futures::{AsyncRead, AsyncWrite, TryFutureExt};
 use mpz_common::Allocate;
@@ -231,6 +232,16 @@ impl Prover<state::Closed> {
     /// This function transitions the prover into a state where it can prove content of the
     /// transcript.
     pub fn start_prove(self) -> Prover<Prove> {
+        Prover {
+            config: self.config,
+            state: self.state.into(),
+        }
+    }
+
+    /// Aborts the prover when the TLS session gets dropped by peer
+    ///
+    /// This function transitions the prover into a state where it can finalize the MPC session.
+    pub fn abort(self) -> Prover<Abort> {
         Prover {
             config: self.config,
             state: self.state.into(),
